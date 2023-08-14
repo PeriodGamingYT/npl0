@@ -172,72 +172,6 @@ int expect(char x) {
 	next();
 }
 
-// expr parsing
-int expr();
-int value() {
-	int value = 0;
-	if(token == STOP || !(*src) || *src == -1) {
-		fprintf(stderr, "can't find a token to get value of, found end of file instead\n");
-		exit(1);
-	}
-
-	switch(token) {
-		case '(':
-			expect('(');
-			value = expr();
-			expect(')');
-			break;
-
-		case '!': expect('!'); value = !expr(); break;
-		case '~': expect('~'); value = ~expr(); break;
-		case '-': expect('-'); value = -expr(); break;
-		default:
-			value = token_val;
-			expect(NUM);
-			break;
-	}
-
-	return value;
-}
-
-int expr_tail(int left_val) {
-	switch(token) {
-		case '+': expect('+'); return expr_tail(left_val + value());
-		case '-': expect('-'); return expr_tail(left_val - value());
-		case '*': expect('*'); return expr_tail(left_val * value());
-		case '/': 
-			expect('/'); 
-			int right_val = value();
-			if(right_val == 0) {
-				fprintf(stderr, "can't divide %d by 0\n", left_val);
-				exit(1);
-			}
-			
-			return expr_tail(left_val / right_val);
-			break;
-		
-		case '%': expect('%'); return expr_tail(left_val % value());
-		case '<': expect('<'); return expr_tail(left_val < value());
-		case '>': expect('>'); return expr_tail(left_val > value());
-		case '&': expect('&'); return expr_tail(left_val & value());
-		case '|': expect('|'); return expr_tail(left_val | value());
-		case '^': expect('^'); return expr_tail(left_val ^ value());
-		case EQ: expect(EQ); return expr_tail(left_val == value());
-		case MORE_EQ: expect(MORE_EQ); return expr_tail(left_val >= value());
-		case LESS_EQ: expect(LESS_EQ); return expr_tail(left_val <= value());
-		case NOT_EQ: expect(NOT_EQ); return expr_tail(left_val != value());
-		case SHL: expect(SHL); return expr_tail(left_val << value());
-		case SHR: expect(SHR); return expr_tail(left_val >> value());
-	}
-
-	return left_val;
-}
-
-int expr() {
-	int left_val = value();
-	return expr_tail(left_val);
-}
-
 // variables
 void *safe_realloc(void *ptr, int size) {
 	void *temp = realloc(ptr, size);
@@ -289,13 +223,21 @@ void ident_var_add() {
 	var_scopes[var_scopes_size - 1]++;
 }
 
-int ident_var_index() {
+int ident_var_index(int is_last_error) {
 	for(int i = 0; i < vars_size; i++) {
 		if(strcmp(vars[i].name, ident) == 0) {
 			return i;
 		}
 	}
 
+	if(is_last_error) {
+		fprintf(stderr, "nonexistant variable\n");
+		exit(1);
+
+		// unreachable
+		return -1;
+	}
+	
 	ident_var_add();
 	return vars_size - 1;
 }
@@ -329,6 +271,99 @@ void var_scope_remove() {
 	var_scopes = safe_realloc(var_scopes, sizeof(int) * var_scopes_size);
 }
 
+void free_vars() {
+	free(var_scopes);
+	var_scopes = NULL;
+	var_scopes_size = 0;
+	for(int i = 0; i < vars_size; i++) {
+		free(vars[i].name);
+	}
+
+	free(vars);
+	vars = NULL;
+	vars_size = 0;
+}
+
+// expr parsing
+char ident_copy[IDENT_MAX] = { 0 };
+int expr();
+int value() {
+	int value = 0;
+	if(token == STOP || !(*src) || *src == -1) {
+		fprintf(stderr, "can't find a token to get value of, found end of file instead\n");
+		exit(1);
+	}
+
+	switch(token) {
+		case '(':
+			expect('(');
+			value = expr();
+			expect(')');
+			break;
+
+		case '!': expect('!'); value = !expr(); break;
+		case '~': expect('~'); value = ~expr(); break;
+		case '-': expect('-'); value = -expr(); break;
+		case IDENT:
+			value = vars[ident_var_index(1)].value;
+			memcpy(ident_copy, ident, sizeof(char) * IDENT_MAX);
+			expect(IDENT);
+			break;
+
+		default:
+			value = token_val;
+			expect(NUM);
+			break;
+	}
+
+	return value;
+}
+
+int expr_tail(int left_val) {
+	switch(token) {
+		case '=':
+			expect('=');
+			memcpy(ident, ident_copy, sizeof(char) * IDENT_MAX);
+			int index = ident_var_index(1);
+			vars[index].value = expr_tail(value());
+			return vars[index].value;
+		
+		case '+': expect('+'); return expr_tail(left_val + value());
+		case '-': expect('-'); return expr_tail(left_val - value());
+		case '*': expect('*'); return expr_tail(left_val * value());
+		case '/': 
+			expect('/'); 
+			int right_val = value();
+			if(right_val == 0) {
+				fprintf(stderr, "can't divide %d by 0\n", left_val);
+				exit(1);
+			}
+			
+			return expr_tail(left_val / right_val);
+			break;
+		
+		case '%': expect('%'); return expr_tail(left_val % value());
+		case '<': expect('<'); return expr_tail(left_val < value());
+		case '>': expect('>'); return expr_tail(left_val > value());
+		case '&': expect('&'); return expr_tail(left_val & value());
+		case '|': expect('|'); return expr_tail(left_val | value());
+		case '^': expect('^'); return expr_tail(left_val ^ value());
+		case EQ: expect(EQ); return expr_tail(left_val == value());
+		case MORE_EQ: expect(MORE_EQ); return expr_tail(left_val >= value());
+		case LESS_EQ: expect(LESS_EQ); return expr_tail(left_val <= value());
+		case NOT_EQ: expect(NOT_EQ); return expr_tail(left_val != value());
+		case SHL: expect(SHL); return expr_tail(left_val << value());
+		case SHR: expect(SHR); return expr_tail(left_val >> value());
+	}
+
+	return left_val;
+}
+
+int expr() {
+	int left_val = value();
+	return expr_tail(left_val);
+}
+
 // statement parsing
 int int_pow(int base, int exp) {
 	int orig_base = base;
@@ -343,9 +378,10 @@ void stmt() {
 	int inital = token;
 	switch(inital) {
 		case IDENT:
+		
 			// XXX: saying ident followed by a block is a struct, that isn't handled
 		case NUM:
-			expr();
+			printf("%d\n", expr());
 			break;
 
 		// skip b0 because b0 is only for functions
@@ -387,23 +423,28 @@ void stmt() {
 	}
 }
 
+// main
 #define BUFFER_MAX 128
 int main() {
 	char buffer[BUFFER_MAX] = { 0 };
 	buffer_ptr = &buffer[0];
 	size_t buffer_size = BUFFER_MAX;
 	printf("Ctrl-C to exit\n");
+	var_scopes_size++;
+	var_scopes = safe_realloc(var_scopes, sizeof(int) * var_scopes_size);
+	var_scopes[0] = 0;
 	for(;;) {
 		printf("> ");
 		getline(&buffer_ptr, &buffer_size, stdin);
 		src = buffer_ptr;
 		next();
 		while(token != STOP && *src && *src != -1) {
-			printf("%d\n", expr());
+			stmt();
 		}
 
 		memset(buffer, 0, sizeof(char) * BUFFER_MAX);
 	}
-	
+
+	free_vars();	
 	return 0;
 }
