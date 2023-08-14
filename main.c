@@ -200,14 +200,30 @@ void *safe_malloc(int size) {
 	return temp;
 }
 
+#define VALUE_MAX 8
 typedef struct {
 	char *name;
 	int type_size;
 	int is_pos;
-
-	// XXX: types need to be respected, use char[8] later on
-	int value;
+	unsigned char value[VALUE_MAX];
 } var_t;
+
+// XXX: respect +/- in vars
+void assign_int_var(var_t *var, int x) {
+	memset(var->value, 0, sizeof(unsigned char) * VALUE_MAX);
+	for(int i = 0; i < var->type_size; i++) {
+		var->value[i] = (unsigned char)((x >> (i * 8)) & 0xff);
+	}
+}
+
+int var_to_int(var_t var) {
+	unsigned int result = 0;
+	for(int i = 0; i < var.type_size; i++) {
+		result |= var.value[i] << (i * 8);
+	}
+
+	return result;
+}
 
 var_t *vars = NULL;
 int vars_size = 0;
@@ -305,7 +321,7 @@ int value() {
 		case '~': expect('~'); value = ~expr(); break;
 		case '-': expect('-'); value = -expr(); break;
 		case IDENT:
-			value = vars[ident_var_index(1)].value;
+			value = var_to_int(vars[ident_var_index(1)]);
 			memcpy(ident_copy, ident, sizeof(char) * IDENT_MAX);
 			expect(IDENT);
 			break;
@@ -325,8 +341,8 @@ int expr_tail(int left_val) {
 			expect('=');
 			memcpy(ident, ident_copy, sizeof(char) * IDENT_MAX);
 			int index = ident_var_index(1);
-			vars[index].value = expr_tail(value());
-			return vars[index].value;
+			assign_int_var(&(vars[index]), expr_tail(value()));
+			return var_to_int(vars[index]);
 		
 		case '+': expect('+'); return expr_tail(left_val + value());
 		case '-': expect('-'); return expr_tail(left_val - value());
@@ -366,8 +382,14 @@ int expr() {
 
 // statement parsing
 int int_pow(int base, int exp) {
+	if(exp == 0) {
+		return 1;
+	}
+	
 	int orig_base = base;
-	while(exp--) {
+
+	// pre-dec oper because post-dec exp result is off by one multiplication
+	while(--exp > 0) {
 		base *= orig_base;
 	}
 
@@ -411,14 +433,14 @@ void stmt() {
 			}
 			
 			ident_var_add();
+			printf("%d, %d\n", inital - B8, int_pow(2, inital - B8));
 			vars[vars_size - 1].type_size = int_pow(2, inital - B8);
 			vars[vars_size - 1].is_pos = is_pos;
 			next();
 
 			// XXX: functions use '[', not accounted for
-			// XXX: Types are not respected, change how expr returns stuff to fix
 			expect('=');
-			vars[vars_size - 1].value = expr();
+			assign_int_var(&(vars[vars_size - 1]), expr());
 			break;
 	}
 }
