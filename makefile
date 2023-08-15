@@ -3,7 +3,7 @@ make: main.c
 
 debug:
 	gcc -g -o main main.c
-	valgrind ./main
+	gdb ./main
 
 clean:
 	rm -f main

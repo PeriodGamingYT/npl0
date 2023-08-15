@@ -179,9 +179,6 @@ void *safe_realloc(void *ptr, int size) {
 		free(ptr);
 		fprintf(stderr, "failed realloc\n");
 		exit(1);
-
-		// unreachable
-		return NULL;
 	}
 
 	return temp;
@@ -192,9 +189,6 @@ void *safe_malloc(int size) {
 	if(temp == NULL) {
 		fprintf(stderr, "failed malloc\n");
 		exit(1);
-
-		// unreachable
-		return NULL;
 	}
 
 	return temp;
@@ -208,7 +202,6 @@ typedef struct {
 	unsigned char value[VALUE_MAX];
 } var_t;
 
-// XXX: respect +/- in vars
 void assign_int_var(var_t *var, int x) {
 	memset(var->value, 0, sizeof(unsigned char) * VALUE_MAX);
 	for(int i = 0; i < var->type_size; i++) {
@@ -222,6 +215,11 @@ int var_to_int(var_t var) {
 		result |= var.value[i] << (i * 8);
 	}
 
+	unsigned int min_two_comp = 1 << ((var.type_size * 8) - 1);
+	if(!var.is_pos && result >= min_two_comp) {
+		return result - (min_two_comp * 2);
+	}
+	
 	return result;
 }
 
@@ -249,9 +247,6 @@ int ident_var_index(int is_last_error) {
 	if(is_last_error) {
 		fprintf(stderr, "nonexistant variable\n");
 		exit(1);
-
-		// unreachable
-		return -1;
 	}
 	
 	ident_var_add();
@@ -341,7 +336,7 @@ int expr_tail(int left_val) {
 			expect('=');
 			memcpy(ident, ident_copy, sizeof(char) * IDENT_MAX);
 			int index = ident_var_index(1);
-			assign_int_var(&(vars[index]), expr_tail(value()));
+			assign_int_var(&(vars[index]), expr());
 			return var_to_int(vars[index]);
 		
 		case '+': expect('+'); return expr_tail(left_val + value());
@@ -399,6 +394,11 @@ int int_pow(int base, int exp) {
 void stmt() {
 	int inital = token;
 	switch(inital) {
+
+		// if one of these opers are found here it has to be unary
+		case '-':
+		case '~':
+		case '!':
 		case IDENT:
 		
 			// XXX: saying ident followed by a block is a struct, that isn't handled
@@ -416,24 +416,17 @@ void stmt() {
 			if(token != '+' && token != '-') {
 				fprintf(stderr, "type needs to be followed by a +/-\n");
 				exit(1);
-
-				// unreachable
-				return;
 			}
 
-			// XXX?: doesn't check for '-' because there can only be a + or a -, change this if fixed/floating point is added
+			// NOTE: doesn't check for '-' because there can only be a + or a -, change this if fixed/floating point is added
 			int is_pos = token == '+';
 			next();
 			if(token != IDENT) {
 				fprintf(stderr, "couldn't find name for variable name\n");
 				exit(1);
-
-				// unreachable
-				return;
 			}
 			
 			ident_var_add();
-			printf("%d, %d\n", inital - B8, int_pow(2, inital - B8));
 			vars[vars_size - 1].type_size = int_pow(2, inital - B8);
 			vars[vars_size - 1].is_pos = is_pos;
 			next();
