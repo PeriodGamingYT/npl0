@@ -17,7 +17,6 @@ enum {
 	B8,
 	B16,
 	B32,
-	B64,
 	IF,
 	LOOP,
 	LINK,
@@ -101,7 +100,6 @@ void next() {
 			B8, 
 			B16, 
 			B32, 
-			B64, 
 			IF, 
 			LOOP, 
 			LINK, 
@@ -116,7 +114,6 @@ void next() {
 			"b8",
 			"b16",
 			"b32",
-			"b64",
 			"if",
 			"loop",
 			"link",
@@ -195,24 +192,40 @@ void *safe_malloc(int size) {
 }
 
 #define VALUE_MAX 8
+typedef unsigned char var_value_t[VALUE_MAX];
 typedef struct {
 	char *name;
 	int type_size;
 	int is_pos;
-	unsigned char value[VALUE_MAX];
+	int ptr_count;
+	var_value_t *value;
 } var_t;
 
+var_value_t *var_values = NULL;
+int var_values_size = 0;
+
+var_value_t *var_values_add() {
+	var_values_size++;
+	var_values = safe_realloc(var_values, sizeof(var_value_t) * var_values_size);
+	memset(var_values[var_values_size - 1], 0, sizeof(var_value_t));
+	return &(var_values[var_values_size - 1]);
+}
+
 void assign_int_var(var_t *var, int x) {
-	memset(var->value, 0, sizeof(unsigned char) * VALUE_MAX);
+	if(var->value == NULL) {
+		var->value = var_values_add();
+	}
+	
+	memset(*(var->value), 0, sizeof(var_value_t));
 	for(int i = 0; i < var->type_size; i++) {
-		var->value[i] = (unsigned char)((x >> (i * 8)) & 0xff);
+		*(var->value)[i] = (unsigned char)((x >> (i * 8)) & 0xff);
 	}
 }
 
 int var_to_int(var_t var) {
 	unsigned int result = 0;
 	for(int i = 0; i < var.type_size; i++) {
-		result |= var.value[i] << (i * 8);
+		result |= *(var.value)[i] << (i * 8);
 	}
 
 	unsigned int min_two_comp = 1 << ((var.type_size * 8) - 1);
@@ -283,6 +296,9 @@ void var_scope_remove() {
 }
 
 void free_vars() {
+	free(var_values);
+	var_values = NULL;
+	var_values_size = 0;
 	free(var_scopes);
 	var_scopes = NULL;
 	var_scopes_size = 0;
@@ -406,13 +422,21 @@ void stmt() {
 			printf("%d\n", expr());
 			break;
 
-		// skip b0 because b0 is only for functions
-		// XXX: use ":" for ptr stuff
+		// skip b0 because b0 is only for functions	
 		case B8:
 		case B16:
 		case B32:
-		case B64:
 			next();
+			int ptr_count = 0;
+			if(token == ':') {
+				expect(':');
+				ptr_count = 1;
+				while(token == ':') {
+					ptr_count++;
+					expect(':');
+				}
+			}
+			
 			if(token != '+' && token != '-') {
 				fprintf(stderr, "type needs to be followed by a +/-\n");
 				exit(1);
@@ -430,6 +454,7 @@ void stmt() {
 			vars[vars_size - 1].type_size = int_pow(2, inital - B8);
 			vars[vars_size - 1].is_pos = is_pos;
 			next();
+			vars[vars_size - 1].ptr_count = ptr_count;
 
 			// XXX: functions use '[', not accounted for
 			expect('=');

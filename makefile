@@ -3,6 +3,7 @@ make: main.c
 
 debug:
 	gcc -g -o main main.c
+	clear
 	gdb ./main
 
 clean:
