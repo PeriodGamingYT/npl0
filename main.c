@@ -173,8 +173,11 @@ int expect(char x) {
 void *safe_realloc(void *ptr, int size) {
 	void *temp = realloc(ptr, size);
 	if(temp == NULL) {
-		free(ptr);
-		fprintf(stderr, "failed realloc\n");
+		if(ptr != NULL) {
+			free(ptr);
+		}
+		
+		fprintf(stderr, "failed realloc %p -> %p, %d\n", ptr, temp, size);
 		exit(1);
 	}
 
@@ -191,19 +194,24 @@ void *safe_malloc(int size) {
 	return temp;
 }
 
-#define VALUE_MAX 8
+#define VALUE_MAX 4
+
+// value_t is here for possible encapsulation of vars in the future
+typedef int value_t;
 typedef unsigned char var_value_t[VALUE_MAX];
-typedef struct {
+typedef struct var_s {
 	char *name;
 	int type_size;
 	int is_pos;
 	int ptr_count;
 	var_value_t *value;
+
+	// using w/ ptr ref in expr_tail()
+	struct var_s *real;
 } var_t;
 
 var_value_t *var_values = NULL;
 int var_values_size = 0;
-
 var_value_t *var_values_add() {
 	var_values_size++;
 	var_values = safe_realloc(var_values, sizeof(var_value_t) * var_values_size);
@@ -211,21 +219,22 @@ var_value_t *var_values_add() {
 	return &(var_values[var_values_size - 1]);
 }
 
+// (*(var->value))[i] parens are needed!
 void assign_int_var(var_t *var, int x) {
 	if(var->value == NULL) {
 		var->value = var_values_add();
 	}
 	
 	memset(*(var->value), 0, sizeof(var_value_t));
-	for(int i = 0; i < var->type_size; i++) {
-		*(var->value)[i] = (unsigned char)((x >> (i * 8)) & 0xff);
+	for(int i = 0; i < var->type_size && i < (int) sizeof(x); i++) {
+		(*(var->value))[i] = (unsigned char)((x >> (i * 8)) & 0xff);
 	}
 }
 
 int var_to_int(var_t var) {
 	unsigned int result = 0;
 	for(int i = 0; i < var.type_size; i++) {
-		result |= *(var.value)[i] << (i * 8);
+		result |= (*(var.value))[i] << (i * 8);
 	}
 
 	unsigned int min_two_comp = 1 << ((var.type_size * 8) - 1);
@@ -295,26 +304,12 @@ void var_scope_remove() {
 	var_scopes = safe_realloc(var_scopes, sizeof(int) * var_scopes_size);
 }
 
-void free_vars() {
-	free(var_values);
-	var_values = NULL;
-	var_values_size = 0;
-	free(var_scopes);
-	var_scopes = NULL;
-	var_scopes_size = 0;
-	for(int i = 0; i < vars_size; i++) {
-		free(vars[i].name);
-	}
-
-	free(vars);
-	vars = NULL;
-	vars_size = 0;
-}
-
 // expr parsing
 char ident_copy[IDENT_MAX] = { 0 };
-int expr();
-int value() {
+value_t expr();
+var_t *expr_values = NULL;
+int expr_values_size = 0;
+value_t value() {
 	int value = 0;
 	if(token == STOP || !(*src) || *src == -1) {
 		fprintf(stderr, "can't find a token to get value of, found end of file instead\n");
@@ -331,8 +326,56 @@ int value() {
 		case '!': expect('!'); value = !expr(); break;
 		case '~': expect('~'); value = ~expr(); break;
 		case '-': expect('-'); value = -expr(); break;
+
+		// :a will deref a, ref is in expr_tail()
+		case ':':
+			expect(':');
+			if(expr_values == NULL || expr_values[expr_values_size - 1].value != NULL) {
+				expr_values_size++;
+				expr_values = safe_realloc(expr_values, sizeof(var_t) * expr_values_size);
+				expr_values[expr_values_size - 1] = (var_t) {
+					NULL,
+					-1,
+					-1,
+					0,
+					NULL,
+					NULL
+				};
+			}
+
+			expr_values[expr_values_size - 1].ptr_count++;
+			break;
+		
 		case IDENT:
-			value = var_to_int(vars[ident_var_index(1)]);
+
+			// deref first
+			var_t var = vars[ident_var_index(1)];
+			var.real = &(vars[ident_var_index(1)]);
+			if(expr_values != NULL && expr_values[expr_values_size - 1].value == NULL) {
+				int deref_count = var.ptr_count - expr_values[expr_values_size - 1].ptr_count;
+				if(deref_count < 0) {
+					fprintf(stderr, "pointer over dereferenced (%d over)\n", -deref_count);
+					exit(1);
+				}
+
+				while(deref_count-- >= 0) {
+					if(var.value == NULL) {
+						fprintf(stderr, "dereferenced uninitalized pointer\n");
+						exit(1);
+					}
+
+					// NOTE: cast to ptr from int, don't try to fix but keep tabs on it
+					var = *((var_t *) var_to_int(var));
+				}
+
+				expr_values_size--;
+				expr_values = safe_realloc(expr_values, sizeof(var_t) * expr_values_size);
+			}
+
+			expr_values_size++;
+			expr_values = safe_realloc(expr_values, sizeof(var_t) * expr_values_size);
+			expr_values[expr_values_size - 1] = var;
+			value = var_to_int(var);
 			memcpy(ident_copy, ident, sizeof(char) * IDENT_MAX);
 			expect(IDENT);
 			break;
@@ -346,13 +389,26 @@ int value() {
 	return value;
 }
 
-int expr_tail(int left_val) {
+value_t expr_tail(int left_val) {
 	switch(token) {
+		case ':':
+
+			// NOTE: cast from ptr to int, don't try to fix but keep tabs on it.
+			expect(':');
+			return expr_tail((value_t) (expr_values[expr_values_size - 1].real));
+		
 		case '=':
 			expect('=');
 			memcpy(ident, ident_copy, sizeof(char) * IDENT_MAX);
 			int index = ident_var_index(1);
-			assign_int_var(&(vars[index]), expr());
+			assign_int_var(
+				expr_values == NULL 
+					? &(vars[index])
+					: expr_values[expr_values_size - 1].real,
+				
+				expr()
+			);
+			
 			return var_to_int(vars[index]);
 		
 		case '+': expect('+'); return expr_tail(left_val + value());
@@ -386,7 +442,7 @@ int expr_tail(int left_val) {
 	return left_val;
 }
 
-int expr() {
+value_t expr() {
 	int left_val = value();
 	return expr_tail(left_val);
 }
@@ -412,6 +468,7 @@ void stmt() {
 	switch(inital) {
 
 		// if one of these opers are found here it has to be unary
+		case ':': 
 		case '-':
 		case '~':
 		case '!':
@@ -453,17 +510,45 @@ void stmt() {
 			ident_var_add();
 			vars[vars_size - 1].type_size = int_pow(2, inital - B8);
 			vars[vars_size - 1].is_pos = is_pos;
-			next();
 			vars[vars_size - 1].ptr_count = ptr_count;
+			vars[vars_size - 1].real = NULL;
+			vars[vars_size - 1].value = NULL;
+			next();
 
 			// XXX: functions use '[', not accounted for
 			expect('=');
 			assign_int_var(&(vars[vars_size - 1]), expr());
 			break;
 	}
+
+	if(expr_values != NULL) {
+		free(expr_values);
+	}
 }
 
 // main
+void free_vars() {
+	if(expr_values != NULL) {
+		free(expr_values);
+	}
+	
+	expr_values = NULL;
+	expr_values_size = 0;
+	free(var_values);
+	var_values = NULL;
+	var_values_size = 0;
+	free(var_scopes);
+	var_scopes = NULL;
+	var_scopes_size = 0;
+	for(int i = 0; i < vars_size; i++) {
+		free(vars[i].name);
+	}
+
+	free(vars);
+	vars = NULL;
+	vars_size = 0;
+}
+
 #define BUFFER_MAX 128
 int main() {
 	char buffer[BUFFER_MAX] = { 0 };
@@ -485,6 +570,6 @@ int main() {
 		memset(buffer, 0, sizeof(char) * BUFFER_MAX);
 	}
 
-	free_vars();	
+	free_vars();
 	return 0;
 }
