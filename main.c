@@ -1,6 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+
+#define H(_x) \
+	fprintf(stderr, "hit%s\n", #_x);
 
 // lexing
 enum { 
@@ -17,6 +21,8 @@ enum {
 	B8,
 	B16,
 	B32,
+	B64,
+	BPTR,
 	IF,
 	LOOP,
 	LINK,
@@ -100,6 +106,8 @@ void next() {
 			B8, 
 			B16, 
 			B32, 
+			B64,
+			BPTR,
 			IF, 
 			LOOP, 
 			LINK, 
@@ -114,6 +122,8 @@ void next() {
 			"b8",
 			"b16",
 			"b32",
+			"b64",
+			"bptr",
 			"if",
 			"loop",
 			"link",
@@ -194,20 +204,16 @@ void *safe_malloc(int size) {
 	return temp;
 }
 
-#define VALUE_MAX 4
+#define VALUE_MAX 8
 
 // value_t is here for possible encapsulation of vars in the future
-typedef int value_t;
+typedef uintptr_t value_t;
 typedef unsigned char var_value_t[VALUE_MAX];
 typedef struct var_s {
 	char *name;
 	int type_size;
 	int is_pos;
-	int ptr_count;
 	var_value_t *value;
-
-	// using w/ ptr ref in expr_tail()
-	struct var_s *real;
 } var_t;
 
 var_value_t *var_values = NULL;
@@ -219,30 +225,26 @@ var_value_t *var_values_add() {
 	return &(var_values[var_values_size - 1]);
 }
 
+value_t var_to_int(var_t var) {
+	value_t result = *((value_t *) var.value);
+	value_t min_two_comp = 1 << ((var.type_size * 8) - 1);
+	if(!var.is_pos && result >= min_two_comp) {
+		return result - (min_two_comp * 2);
+	}
+
+	return result;
+}
+
 // (*(var->value))[i] parens are needed!
-void assign_int_var(var_t *var, int x) {
+void assign_int_var(var_t *var, value_t x) {
 	if(var->value == NULL) {
 		var->value = var_values_add();
 	}
 	
 	memset(*(var->value), 0, sizeof(var_value_t));
-	for(int i = 0; i < var->type_size && i < (int) sizeof(x); i++) {
+	for(int i = 0; i < var->type_size; i++) {
 		(*(var->value))[i] = (unsigned char)((x >> (i * 8)) & 0xff);
 	}
-}
-
-int var_to_int(var_t var) {
-	unsigned int result = 0;
-	for(int i = 0; i < var.type_size; i++) {
-		result |= (*(var.value))[i] << (i * 8);
-	}
-
-	unsigned int min_two_comp = 1 << ((var.type_size * 8) - 1);
-	if(!var.is_pos && result >= min_two_comp) {
-		return result - (min_two_comp * 2);
-	}
-	
-	return result;
 }
 
 var_t *vars = NULL;
@@ -307,10 +309,9 @@ void var_scope_remove() {
 // expr parsing
 char ident_copy[IDENT_MAX] = { 0 };
 value_t expr();
-var_t *expr_values = NULL;
-int expr_values_size = 0;
+int found_ident = 0;
 value_t value() {
-	int value = 0;
+	value_t value = 0;
 	if(token == STOP || !(*src) || *src == -1) {
 		fprintf(stderr, "can't find a token to get value of, found end of file instead\n");
 		exit(1);
@@ -326,58 +327,26 @@ value_t value() {
 		case '!': expect('!'); value = !expr(); break;
 		case '~': expect('~'); value = ~expr(); break;
 		case '-': expect('-'); value = -expr(); break;
-
-		// :a will deref a, ref is in expr_tail()
 		case ':':
 			expect(':');
-			if(expr_values == NULL || expr_values[expr_values_size - 1].value != NULL) {
-				expr_values_size++;
-				expr_values = safe_realloc(expr_values, sizeof(var_t) * expr_values_size);
-				expr_values[expr_values_size - 1] = (var_t) {
-					NULL,
-					-1,
-					-1,
-					0,
-					NULL,
-					NULL
-				};
+			if(token != IDENT) {
+				fprintf(stderr, "a : needs to be after or before an identifier");
+				exit(1);
 			}
 
-			expr_values[expr_values_size - 1].ptr_count++;
-			break;
+			int index = ident_var_index(1);
+			value_t var_val = var_to_int(vars[index]);
+			expect(IDENT);
+			found_ident = 0;
+			printf("1 %lx\n%p\n", var_val, vars[0].value);
+			return var_val;
 		
 		case IDENT:
-
-			// deref first
 			var_t var = vars[ident_var_index(1)];
-			var.real = &(vars[ident_var_index(1)]);
-			if(expr_values != NULL && expr_values[expr_values_size - 1].value == NULL) {
-				int deref_count = var.ptr_count - expr_values[expr_values_size - 1].ptr_count;
-				if(deref_count < 0) {
-					fprintf(stderr, "pointer over dereferenced (%d over)\n", -deref_count);
-					exit(1);
-				}
-
-				while(deref_count-- >= 0) {
-					if(var.value == NULL) {
-						fprintf(stderr, "dereferenced uninitalized pointer\n");
-						exit(1);
-					}
-
-					// NOTE: cast to ptr from int, don't try to fix but keep tabs on it
-					var = *((var_t *) var_to_int(var));
-				}
-
-				expr_values_size--;
-				expr_values = safe_realloc(expr_values, sizeof(var_t) * expr_values_size);
-			}
-
-			expr_values_size++;
-			expr_values = safe_realloc(expr_values, sizeof(var_t) * expr_values_size);
-			expr_values[expr_values_size - 1] = var;
 			value = var_to_int(var);
 			memcpy(ident_copy, ident, sizeof(char) * IDENT_MAX);
 			expect(IDENT);
+			found_ident = 1;
 			break;
 
 		default:
@@ -389,36 +358,69 @@ value_t value() {
 	return value;
 }
 
-value_t expr_tail(int left_val) {
+int int_pow(int base, int exp) {
+	if(exp == 0) {
+		return 1;
+	}
+	
+	int orig_base = base;
+
+	// pre-dec oper because post-dec exp result is off by one multiplication
+	while(--exp > 0) {
+		base *= orig_base;
+	}
+
+	return base;
+}
+
+value_t expr_tail(value_t left_val) {
+	int index = -1;
 	switch(token) {
 		case ':':
-
-			// NOTE: cast from ptr to int, don't try to fix but keep tabs on it.
 			expect(':');
-			return expr_tail((value_t) (expr_values[expr_values_size - 1].real));
+			memcpy(ident, ident_copy, sizeof(char) * IDENT_MAX);
+			index = ident_var_index(1);
+			return expr_tail((value_t)(*(vars[index].value)));
 		
 		case '=':
 			expect('=');
-			memcpy(ident, ident_copy, sizeof(char) * IDENT_MAX);
-			int index = ident_var_index(1);
-			assign_int_var(
-				expr_values == NULL 
-					? &(vars[index])
-					: expr_values[expr_values_size - 1].real,
-				
-				expr()
-			);
+			if(found_ident) {
+				found_ident = 0;
+				memcpy(ident, ident_copy, sizeof(char) * IDENT_MAX);
+				index = ident_var_index(1);
+				value_t temp_expr = expr();
+				assign_int_var(&(vars[index]), temp_expr);
+				return var_to_int(vars[index]);
+			}
+
+			if(token < B8 || token > BPTR) {
+				fprintf(stderr, "can't find type, when assigning to address\n");
+				exit(1);
+			}
+
+			int type_size = int_pow(2, token - B8);
+			if(token == BPTR) {
+				void *test_size = NULL;
+				type_size = sizeof(test_size);
+			}
 			
-			return var_to_int(vars[index]);
+			next();
+			value_t expr_val = expr();
+			unsigned char *ptr = (unsigned char *) left_val;
+			for(int i = 0; i < type_size; i++) {
+				ptr[i] = (unsigned char)((expr_val >> (i * 8)) & 0xff);
+			}
+			
+			return expr_val;
 		
 		case '+': expect('+'); return expr_tail(left_val + value());
 		case '-': expect('-'); return expr_tail(left_val - value());
 		case '*': expect('*'); return expr_tail(left_val * value());
 		case '/': 
 			expect('/'); 
-			int right_val = value();
+			value_t right_val = value();
 			if(right_val == 0) {
-				fprintf(stderr, "can't divide %d by 0\n", left_val);
+				fprintf(stderr, "can't divide %ld by 0\n", left_val);
 				exit(1);
 			}
 			
@@ -443,26 +445,11 @@ value_t expr_tail(int left_val) {
 }
 
 value_t expr() {
-	int left_val = value();
+	value_t left_val = value();
 	return expr_tail(left_val);
 }
 
 // statement parsing
-int int_pow(int base, int exp) {
-	if(exp == 0) {
-		return 1;
-	}
-	
-	int orig_base = base;
-
-	// pre-dec oper because post-dec exp result is off by one multiplication
-	while(--exp > 0) {
-		base *= orig_base;
-	}
-
-	return base;
-}
-
 void stmt() {
 	int inital = token;
 	switch(inital) {
@@ -476,30 +463,27 @@ void stmt() {
 		
 			// XXX: saying ident followed by a block is a struct, that isn't handled
 		case NUM:
-			printf("%d\n", expr());
+			printf("%ld\n", expr());
 			break;
 
 		// skip b0 because b0 is only for functions	
 		case B8:
 		case B16:
 		case B32:
-			next();
-			int ptr_count = 0;
-			if(token == ':') {
-				expect(':');
-				ptr_count = 1;
-				while(token == ':') {
-					ptr_count++;
-					expect(':');
-				}
+		case B64:
+			void *test_size = NULL;
+			if(sizeof(test_size) < 8) {
+				fprintf(stderr, "you are not a 64-bit computer\n");
+				exit(1);
 			}
-			
+
+		case BPTR:
+			next();			
 			if(token != '+' && token != '-') {
 				fprintf(stderr, "type needs to be followed by a +/-\n");
 				exit(1);
 			}
 
-			// NOTE: doesn't check for '-' because there can only be a + or a -, change this if fixed/floating point is added
 			int is_pos = token == '+';
 			next();
 			if(token != IDENT) {
@@ -509,31 +493,25 @@ void stmt() {
 			
 			ident_var_add();
 			vars[vars_size - 1].type_size = int_pow(2, inital - B8);
+			if(inital == BPTR) {
+				vars[vars_size - 1].type_size = sizeof(test_size);	
+			}
+			
 			vars[vars_size - 1].is_pos = is_pos;
-			vars[vars_size - 1].ptr_count = ptr_count;
-			vars[vars_size - 1].real = NULL;
 			vars[vars_size - 1].value = NULL;
 			next();
 
 			// XXX: functions use '[', not accounted for
 			expect('=');
-			assign_int_var(&(vars[vars_size - 1]), expr());
+			value_t temp_expr = expr();
+printf("4 0x%lx\n", temp_expr);
+			assign_int_var(&(vars[vars_size - 1]), temp_expr);
 			break;
-	}
-
-	if(expr_values != NULL) {
-		free(expr_values);
 	}
 }
 
 // main
 void free_vars() {
-	if(expr_values != NULL) {
-		free(expr_values);
-	}
-	
-	expr_values = NULL;
-	expr_values_size = 0;
 	free(var_values);
 	var_values = NULL;
 	var_values_size = 0;
@@ -558,6 +536,7 @@ int main() {
 	var_scopes_size++;
 	var_scopes = safe_realloc(var_scopes, sizeof(int) * var_scopes_size);
 	var_scopes[0] = 0;
+	atexit(free_vars);
 	for(;;) {
 		printf("> ");
 		getline(&buffer_ptr, &buffer_size, stdin);
@@ -569,7 +548,4 @@ int main() {
 
 		memset(buffer, 0, sizeof(char) * BUFFER_MAX);
 	}
-
-	free_vars();
-	return 0;
 }

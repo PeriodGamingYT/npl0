@@ -9,7 +9,7 @@ gdb:
 val:
 	gcc -g -o main main.c
 	clear
-	valgrind ./main
+	valgrind  --trace-children=yes --track-fds=yes --track-origins=yes --leak-check=full --show-leak-kinds=all ./main
 
 clean:
 	rm -f main
