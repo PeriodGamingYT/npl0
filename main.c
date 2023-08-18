@@ -472,7 +472,7 @@ void stmt() {
 		case B64:
 			void *test_size = NULL;
 			if(sizeof(test_size) < 8) {
-				fprintf(stderr, "you are not a 64-bit computer\n");
+				fprintf(stderr, "you are not on a 64-bit computer\n");
 				exit(1);
 			}
 
