@@ -338,7 +338,6 @@ value_t value() {
 			value_t var_val = var_to_int(vars[index]);
 			expect(IDENT);
 			found_ident = 0;
-			printf("1 %lx\n%p\n", var_val, vars[0].value);
 			return var_val;
 		
 		case IDENT:
@@ -504,7 +503,6 @@ void stmt() {
 			// XXX: functions use '[', not accounted for
 			expect('=');
 			value_t temp_expr = expr();
-printf("4 0x%lx\n", temp_expr);
 			assign_int_var(&(vars[vars_size - 1]), temp_expr);
 			break;
 	}
