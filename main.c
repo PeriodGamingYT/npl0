@@ -6,6 +6,8 @@
 #define H(_x) \
 	fprintf(stderr, "hit%s\n", #_x);
 
+void die();
+
 // lexing
 enum { 
 	NUM, 
@@ -33,8 +35,9 @@ enum {
 	SIZEOF
 };
 
+typedef uintptr_t value_t;
 int token = 0;
-int token_val = 0;
+value_t token_val = 0;
 char *src = NULL;
 char *buffer_ptr = NULL;
 
@@ -204,10 +207,8 @@ void *safe_malloc(int size) {
 	return temp;
 }
 
-#define VALUE_MAX 8
-
 // value_t is here for possible encapsulation of vars in the future
-typedef uintptr_t value_t;
+#define VALUE_MAX 8
 typedef unsigned char var_value_t[VALUE_MAX];
 typedef struct var_s {
 	char *name;
@@ -377,9 +378,50 @@ value_t expr_tail(value_t left_val) {
 	switch(token) {
 		case ':':
 			expect(':');
-			memcpy(ident, ident_copy, sizeof(char) * IDENT_MAX);
-			index = ident_var_index(1);
-			return expr_tail((value_t)(*(vars[index].value)));
+			if(found_ident) {
+				found_ident = 0;
+				memcpy(ident, ident_copy, sizeof(char) * IDENT_MAX);
+				index = ident_var_index(1);
+				if(token < B8 || token > B64) {
+					return expr_tail((value_t)(*(vars[index].value)));
+				}
+			}
+
+			if(token < B8 || token > B64) {
+				fprintf(stderr, "if you are going to use a colon with a number, give a type and a +/- with it\n");
+				exit(1);
+			}
+
+			int val_size = int_pow(2, token - B8);
+			next();
+			if(token != '+' && token != '-') {
+				fprintf(stderr, "if a colon is followed by a type, give a +/-\n");
+				exit(1);
+			}
+			
+			int val_pos = token == '+';
+			value_t val = found_ident
+				? *((value_t *) *((value_t *) vars[index].value))
+
+				// can't do cast or else it will get 8 bytes no matter what
+				: 0;
+
+			unsigned char *left_ptr = left_val;
+
+			// edge case handling (for above) happens here
+			if(!found_ident) {
+				for(int i = 0; i < val_size; i++) {
+					val |= (value_t)(left_ptr[i]) << (i * 8);
+				}
+			}
+			
+			value_t min_two_comp = 1 << ((val_size * 8) - 1);
+			if(!val_pos && val >= min_two_comp) {
+				return val - (min_two_comp * 2);
+			}
+
+			next();
+			return expr_tail(val);
 		
 		case '=':
 			expect('=');
@@ -454,6 +496,7 @@ void stmt() {
 	switch(inital) {
 
 		// if one of these opers are found here it has to be unary
+		case '(':
 		case ':': 
 		case '-':
 		case '~':
@@ -462,7 +505,7 @@ void stmt() {
 		
 			// XXX: saying ident followed by a block is a struct, that isn't handled
 		case NUM:
-			printf("%ld\n", expr());
+			printf("expr %ld\n", expr());
 			break;
 
 		// skip b0 because b0 is only for functions	
@@ -504,6 +547,7 @@ void stmt() {
 			expect('=');
 			value_t temp_expr = expr();
 			assign_int_var(&(vars[vars_size - 1]), temp_expr);
+			printf("decl %ld\n", temp_expr);
 			break;
 	}
 }
