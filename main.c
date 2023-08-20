@@ -6,8 +6,6 @@
 #define H(_x) \
 	fprintf(stderr, "hit%s\n", #_x);
 
-void die();
-
 // lexing
 enum { 
 	NUM, 
