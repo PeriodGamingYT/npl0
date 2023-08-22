@@ -181,9 +181,14 @@ int expect(char x) {
 }
 
 // variables
-void *safe_realloc(void *ptr, int size) {
+void *safe_realloc(void *ptr, unsigned int size) {
+	if(size <= 0) {
+		free(ptr);
+		return NULL;
+	}
+	
 	void *temp = realloc(ptr, size);
-	if(temp == NULL) {
+	if(temp == NULL && size > 0) {
 		if(ptr != NULL) {
 			free(ptr);
 		}
@@ -195,9 +200,13 @@ void *safe_realloc(void *ptr, int size) {
 	return temp;
 }
 
-void *safe_malloc(int size) {
+void *safe_malloc(unsigned int size) {
+	if(size <= 0) {
+		return NULL;
+	}
+	
 	void *temp = malloc(size);
-	if(temp == NULL) {
+	if(temp == NULL && size > 0) {
 		fprintf(stderr, "failed malloc\n");
 		exit(1);
 	}
@@ -283,18 +292,23 @@ void var_scope_add() {
 }
 
 void var_scope_remove() {
+	if(vars_size <= 0) {
+		return;
+	}
+	
 	if(var_scopes_size <= 0) {
 		fprintf(stderr, "can't remove scope any further\n");
 		exit(1);
 	}
 	
-	int size = var_scopes_size - 1;
+	int size = vars_size;
 	int scope_size = var_scopes[var_scopes_size - 1];
-	for(int i = size; i >= size - scope_size; i--) {
+	for(int i = size - 1; i >= size - scope_size && i >= 0; i--) {
 		if(vars[i].name == NULL) {
 			continue;
 		}
-		
+
+// segfault
 		free(vars[i].name);
 		vars[i].name = NULL;
 	}
@@ -306,6 +320,21 @@ void var_scope_remove() {
 }
 
 // expr parsing
+int int_pow(int base, int exp) {
+	if(exp == 0) {
+		return 1;
+	}
+	
+	int orig_base = base;
+
+	// pre-dec oper because post-dec exp result is off by one multiplication
+	while(--exp > 0) {
+		base *= orig_base;
+	}
+
+	return base;
+}
+
 char ident_copy[IDENT_MAX] = { 0 };
 value_t expr();
 int found_ident = 0;
@@ -347,6 +376,25 @@ value_t value() {
 			found_ident = 1;
 			break;
 
+		case SIZEOF:
+			expect(SIZEOF);
+			expect('[');
+			if(token < B8 || token > BPTR) {
+				fprintf(stderr, "sizeof needs a type\n");
+				exit(1);
+			}
+
+			int type_size = int_pow(2, token - B8);
+			if(token == BPTR) {
+				void *test_size = NULL;
+				type_size = sizeof(test_size);
+			}
+
+			value = type_size;
+			next();
+			expect(']');
+			break;
+
 		default:
 			value = token_val;
 			expect(NUM);
@@ -354,21 +402,6 @@ value_t value() {
 	}
 
 	return value;
-}
-
-int int_pow(int base, int exp) {
-	if(exp == 0) {
-		return 1;
-	}
-	
-	int orig_base = base;
-
-	// pre-dec oper because post-dec exp result is off by one multiplication
-	while(--exp > 0) {
-		base *= orig_base;
-	}
-
-	return base;
 }
 
 value_t expr_tail(value_t left_val) {
@@ -404,7 +437,7 @@ value_t expr_tail(value_t left_val) {
 				// can't do cast or else it will get 8 bytes no matter what
 				: 0;
 
-			unsigned char *left_ptr = left_val;
+			unsigned char *left_ptr = (unsigned char *) left_val;
 
 			// edge case handling (for above) happens here
 			if(!found_ident) {
@@ -499,6 +532,7 @@ void stmt() {
 		case '-':
 		case '~':
 		case '!':
+		case SIZEOF:
 		case IDENT:
 		
 			// XXX: saying ident followed by a block is a struct, that isn't handled
@@ -547,22 +581,48 @@ void stmt() {
 			assign_int_var(&(vars[vars_size - 1]), temp_expr);
 			printf("decl %ld\n", temp_expr);
 			break;
+
+		case '{':
+			printf("block enter %d\n", var_scopes_size + 1);
+			expect('{');
+			var_scope_add();
+			break;
+
+		case '}':
+			printf("block remove %d\n", var_scopes_size - 1);
+			expect('}');
+			var_scope_remove();
+			break;
 	}
 }
 
 // main
 void free_vars() {
-	free(var_values);
+	if(var_values != NULL) {
+		free(var_values);
+	}
+	
 	var_values = NULL;
 	var_values_size = 0;
-	free(var_scopes);
+	if(var_scopes != NULL) {
+		free(var_scopes);
+	}
+	
 	var_scopes = NULL;
 	var_scopes_size = 0;
-	for(int i = 0; i < vars_size; i++) {
+	for(int i = 0; i < vars_size && vars != NULL; i++) {
+		if(vars[i].name == NULL) {
+			continue;
+		}
+		
 		free(vars[i].name);
+		vars[i].name = NULL;
 	}
 
-	free(vars);
+	if(vars != NULL) {
+		free(vars);
+	}
+
 	vars = NULL;
 	vars_size = 0;
 }
@@ -578,7 +638,7 @@ int main() {
 	var_scopes[0] = 0;
 	atexit(free_vars);
 	for(;;) {
-		printf("> ");
+		printf("%s", var_scopes_size == 1 ? "> " : "  ");
 		getline(&buffer_ptr, &buffer_size, stdin);
 		src = buffer_ptr;
 		next();
