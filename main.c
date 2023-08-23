@@ -30,7 +30,8 @@ enum {
 	HEAP,
 	NOFREE,
 	RODATA,
-	SIZEOF
+	SIZEOF,
+	ELSE
 };
 
 typedef uintptr_t value_t;
@@ -115,7 +116,8 @@ void next() {
 			STACK, 
 			HEAP, 
 			NOFREE,
-			SIZEOF
+			SIZEOF,
+			ELSE
 		};
 
 		const char *reserved[] = {
@@ -131,7 +133,8 @@ void next() {
 			"stack",
 			"heap",
 			"nofree",
-			"sizeof"
+			"sizeof",
+			"else"
 		};
 
 		for(int i = 0; i < ARRAY_SIZE(reserved); i++) {
@@ -214,7 +217,6 @@ void *safe_malloc(unsigned int size) {
 	return temp;
 }
 
-// value_t is here for possible encapsulation of vars in the future
 #define VALUE_MAX 8
 typedef unsigned char var_value_t[VALUE_MAX];
 typedef struct var_s {
@@ -292,10 +294,6 @@ void var_scope_add() {
 }
 
 void var_scope_remove() {
-	if(vars_size <= 0) {
-		return;
-	}
-	
 	if(var_scopes_size <= 0) {
 		fprintf(stderr, "can't remove scope any further\n");
 		exit(1);
@@ -307,8 +305,7 @@ void var_scope_remove() {
 		if(vars[i].name == NULL) {
 			continue;
 		}
-
-// segfault
+		
 		free(vars[i].name);
 		vars[i].name = NULL;
 	}
@@ -522,6 +519,20 @@ value_t expr() {
 }
 
 // statement parsing
+void skip_block() {
+	int brace_count = 0;
+	do {
+		brace_count += token == '{';
+		brace_count -= token == '}';
+		next();
+	} while(brace_count > 0 && token != STOP);
+	if(token == STOP) {
+		fprintf(stderr, "unmatched braces\n");
+		exit(1);
+	}
+}
+
+int last_if_result = 0;
 void stmt() {
 	int inital = token;
 	switch(inital) {
@@ -582,16 +593,52 @@ void stmt() {
 			printf("decl %ld\n", temp_expr);
 			break;
 
+		case IF:
+			expect(IF);
+			int result = expr();
+			last_if_result = !!result;
+			if(!result) {
+				skip_block();
+				break;
+			}
+
+			goto else_skip;
+
+		case ELSE:
+			expect(ELSE);
+			if(last_if_result) {
+				if(token == IF) {
+					expect(IF);
+					expr();
+				}
+				
+				skip_block();
+				break;
+			}
+
+			if(token == IF) {
+				expect(IF);
+				int result = expr();
+				last_if_result = !!result;
+				if(!result) {
+					break;
+				}
+			}
+
+else_skip:
 		case '{':
-			printf("block enter %d\n", var_scopes_size + 1);
+			printf("block enter %d -> %d\n", var_scopes_size, var_scopes_size + 1);
 			expect('{');
 			var_scope_add();
 			break;
 
 		case '}':
-			printf("block remove %d\n", var_scopes_size - 1);
+			printf("block remove %d -> %d\n", var_scopes_size, var_scopes_size - 1);
 			expect('}');
 			var_scope_remove();
+
+			// hack to skip an if chain
+			last_if_result = 1;
 			break;
 	}
 }
