@@ -532,7 +532,22 @@ void skip_block() {
 	}
 }
 
+enum {
+	IF,
+	LOOP
+};
+
+typedef struct {
+	int type;
+	char *start;
+	int eval;
+	int is_evaled;	
+};
+
+// XXX: Replace this with a control flow stack using struct from above.
 int last_if_result = 0;
+char **loop_stack = NULL;
+int loop_stack_size = 0;
 void stmt() {
 	int inital = token;
 	switch(inital) {
@@ -602,7 +617,7 @@ void stmt() {
 				break;
 			}
 
-			goto else_skip;
+			goto control_flow_skip;
 
 		case ELSE:
 			expect(ELSE);
@@ -625,7 +640,16 @@ void stmt() {
 				}
 			}
 
-else_skip:
+			goto control_flow_skip;
+
+		case LOOP:
+			loop_stack_size++;
+			loop_stack = safe_realloc(loop_stack, sizeof(char *) * loop_stack_size);
+			loop_stack[loop_stack_size - 1] = src;
+			expect(LOOP);
+			// XXX: TODO
+
+control_flow_skip:
 		case '{':
 			printf("block enter %d -> %d\n", var_scopes_size, var_scopes_size + 1);
 			expect('{');
@@ -640,6 +664,10 @@ else_skip:
 			// hack to skip an if chain
 			last_if_result = 1;
 			break;
+
+		default:
+			fprintf(stderr, "unimplemented statement\n");
+			exit(1);
 	}
 }
 
