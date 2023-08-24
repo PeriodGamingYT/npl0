@@ -34,7 +34,7 @@ enum {
 	ELSE
 };
 
-typedef uintptr_t value_t;
+typedef intptr_t value_t;
 int token = 0;
 value_t token_val = 0;
 char *src = NULL;
@@ -237,7 +237,9 @@ var_value_t *var_values_add() {
 
 value_t var_to_int(var_t var) {
 	value_t result = *((value_t *) var.value);
-	value_t min_two_comp = 1 << ((var.type_size * 8) - 1);
+
+	// 1 << 63/31 doesn't overflow, ignore warning
+	value_t min_two_comp = 1 << ((sizeof(void *) * 8) - 1);
 	if(!var.is_pos && result >= min_two_comp) {
 		return result - (min_two_comp * 2);
 	}
@@ -252,7 +254,7 @@ void assign_int_var(var_t *var, value_t x) {
 	}
 	
 	memset(*(var->value), 0, sizeof(var_value_t));
-	for(int i = 0; i < var->type_size; i++) {
+	for(int i = 0; i < (int) sizeof(var_value_t); i++) {
 		(*(var->value))[i] = (unsigned char)((x >> (i * 8)) & 0xff);
 	}
 }
@@ -533,8 +535,8 @@ void skip_block() {
 }
 
 enum {
-	IF,
-	LOOP
+	FLOW_IF,
+	FLOW_LOOP
 };
 
 typedef struct {
@@ -542,12 +544,10 @@ typedef struct {
 	char *start;
 	int eval;
 	int is_evaled;	
-};
+} flow_t;
 
-// XXX: Replace this with a control flow stack using struct from above.
-int last_if_result = 0;
-char **loop_stack = NULL;
-int loop_stack_size = 0;
+flow_t *flow_stack = NULL;
+int flow_stack_size = 0;
 void stmt() {
 	int inital = token;
 	switch(inital) {
@@ -571,8 +571,7 @@ void stmt() {
 		case B16:
 		case B32:
 		case B64:
-			void *test_size = NULL;
-			if(sizeof(test_size) < 8) {
+			if(sizeof(void *) < 8) {
 				fprintf(stderr, "you are not on a 64-bit computer\n");
 				exit(1);
 			}
@@ -594,7 +593,7 @@ void stmt() {
 			ident_var_add();
 			vars[vars_size - 1].type_size = int_pow(2, inital - B8);
 			if(inital == BPTR) {
-				vars[vars_size - 1].type_size = sizeof(test_size);	
+				vars[vars_size - 1].type_size = sizeof(void *);	
 			}
 			
 			vars[vars_size - 1].is_pos = is_pos;
@@ -611,17 +610,31 @@ void stmt() {
 		case IF:
 			expect(IF);
 			int result = expr();
-			last_if_result = !!result;
+			flow_t flow = {
+				FLOW_IF,
+				NULL,
+				!!result,
+				0
+			};
+
+			flow_stack_size++;
+			flow_stack = safe_realloc(flow_stack, sizeof(flow_t) * flow_stack_size);
+			flow_stack[flow_stack_size - 1] = flow;
 			if(!result) {
 				skip_block();
 				break;
 			}
 
-			goto control_flow_skip;
+			break;
 
 		case ELSE:
 			expect(ELSE);
-			if(last_if_result) {
+			if(flow_stack_size <= 0) {
+				fprintf(stderr, "else without an if\n");
+				exit(1);
+			}
+			
+			if(flow_stack[flow_stack_size - 1].eval) {
 				if(token == IF) {
 					expect(IF);
 					expr();
@@ -634,22 +647,52 @@ void stmt() {
 			if(token == IF) {
 				expect(IF);
 				int result = expr();
-				last_if_result = !!result;
+				flow_t flow = {
+					FLOW_IF,
+					NULL,
+					!!result,
+					0
+				};
+
+				flow_stack_size++;
+				flow_stack = safe_realloc(flow_stack, sizeof(flow_t) * flow_stack_size);
+				flow_stack[flow_stack_size - 1] = flow;
 				if(!result) {
 					break;
 				}
 			}
 
-			goto control_flow_skip;
+			break;
 
 		case LOOP:
-			loop_stack_size++;
-			loop_stack = safe_realloc(loop_stack, sizeof(char *) * loop_stack_size);
-			loop_stack[loop_stack_size - 1] = src;
-			expect(LOOP);
-			// XXX: TODO
+			flow_t current_flow = flow_stack_size <= 0
 
-control_flow_skip:
+				// no flow, fill with zeros because current_flow will be ignored
+				? (flow_t) { 0, 0, 0, 0 }
+				: flow_stack[flow_stack_size - 1];
+			
+			if(flow_stack_size <= 0 || current_flow.type != LOOP || src != current_flow.start) {
+				flow_t loop_flow = {
+					FLOW_LOOP,
+					src,
+					0,
+					0
+				};
+
+				flow_stack_size++;
+				flow_stack = safe_realloc(flow_stack, sizeof(flow_t) * flow_stack_size);				
+				flow_stack[flow_stack_size - 1] = loop_flow;
+			}
+
+			expect(LOOP);
+			int loop_expr = expr();
+			flow_stack[flow_stack_size - 1].eval = loop_expr;
+			if(!loop_expr) {
+				skip_block();
+			}
+
+			break;
+		
 		case '{':
 			printf("block enter %d -> %d\n", var_scopes_size, var_scopes_size + 1);
 			expect('{');
@@ -660,9 +703,16 @@ control_flow_skip:
 			printf("block remove %d -> %d\n", var_scopes_size, var_scopes_size - 1);
 			expect('}');
 			var_scope_remove();
+			if(flow_stack_size <= 0) {
+				fprintf(stderr, "extra closing parens\n");
+				exit(1);
+			}
 
-			// hack to skip an if chain
-			last_if_result = 1;
+			flow_stack[flow_stack_size - 1].is_evaled = 1;
+			if(flow_stack[flow_stack_size - 1].type == FLOW_LOOP) {
+				src = flow_stack[flow_stack_size - 1].start;
+			}
+
 			break;
 
 		default:
@@ -685,6 +735,12 @@ void free_vars() {
 	
 	var_scopes = NULL;
 	var_scopes_size = 0;
+	if(flow_stack != NULL) {
+		free(flow_stack);
+	}
+
+	flow_stack = NULL;
+	flow_stack_size = 0;
 	for(int i = 0; i < vars_size && vars != NULL; i++) {
 		if(vars[i].name == NULL) {
 			continue;
