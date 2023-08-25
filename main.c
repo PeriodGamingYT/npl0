@@ -38,6 +38,7 @@ typedef intptr_t value_t;
 int token = 0;
 value_t token_val = 0;
 char *src = NULL;
+char *start_src = NULL;
 char *buffer_ptr = NULL;
 
 // 32 (actually 31 because of null term) is plenty, if you need more than that, you're screwed anyway
@@ -563,7 +564,7 @@ void stmt() {
 		
 			// XXX: saying ident followed by a block is a struct, that isn't handled
 		case NUM:
-			printf("expr %ld\n", expr());
+			fprintf(stderr, "expr %ld\n", expr());
 			break;
 
 		// skip b0 because b0 is only for functions	
@@ -604,7 +605,7 @@ void stmt() {
 			expect('=');
 			value_t temp_expr = expr();
 			assign_int_var(&(vars[vars_size - 1]), temp_expr);
-			printf("decl %ld\n", temp_expr);
+			fprintf(stderr, "decl %ld\n", temp_expr);
 			break;
 
 		case IF:
@@ -694,13 +695,13 @@ void stmt() {
 			break;
 		
 		case '{':
-			printf("block enter %d -> %d\n", var_scopes_size, var_scopes_size + 1);
+			fprintf(stderr, "block enter %d -> %d\n", var_scopes_size, var_scopes_size + 1);
 			expect('{');
 			var_scope_add();
 			break;
 
 		case '}':
-			printf("block remove %d -> %d\n", var_scopes_size, var_scopes_size - 1);
+			fprintf(stderr, "block remove %d -> %d\n", var_scopes_size, var_scopes_size - 1);
 			expect('}');
 			var_scope_remove();
 			if(flow_stack_size <= 0) {
@@ -756,27 +757,30 @@ void free_vars() {
 
 	vars = NULL;
 	vars_size = 0;
+	free(start_src);
+	src = NULL;
+	start_src = NULL;
 }
 
-#define BUFFER_MAX 128
 int main() {
-	char buffer[BUFFER_MAX] = { 0 };
-	buffer_ptr = &buffer[0];
-	size_t buffer_size = BUFFER_MAX;
-	printf("Ctrl-C to exit\n");
+	fprintf(stderr, "Ctrl-C to exit, Ctrl-D to run.\n");
 	var_scopes_size++;
 	var_scopes = safe_realloc(var_scopes, sizeof(int) * var_scopes_size);
 	var_scopes[0] = 0;
 	atexit(free_vars);
-	for(;;) {
-		printf("%s", var_scopes_size == 1 ? "> " : "  ");
-		getline(&buffer_ptr, &buffer_size, stdin);
-		src = buffer_ptr;
-		next();
-		while(token != STOP && *src && *src != -1) {
-			stmt();
-		}
+	char input_char = 0;
+	int src_size = 0;
+	while((input_char = fgetc(stdin)) != -1) {
+		src_size++;
+		src = safe_realloc(src, sizeof(char) * (src_size + 1));
+		src[src_size - 1] = input_char;
+		src[src_size] = 0;
+	}
 
-		memset(buffer, 0, sizeof(char) * BUFFER_MAX);
+	start_src = src;
+	fprintf(stderr, "\n");	
+	next();
+	while(token != STOP && *src && *src != -1) {
+		stmt();
 	}
 }
