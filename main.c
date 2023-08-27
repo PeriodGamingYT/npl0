@@ -67,13 +67,13 @@ void next() {
 
 	// comments
 	if(*src == '\\') {
-		while(*src != '\n' && !IS_STOP(*src)) {
+		while(*src != '\n' && *src != '\r' && !IS_STOP(*src)) {
 			src++;
 		}
 	}
 
 	// whitespace
-	while(*src == ' ' || *src == '\t' || *src == '\n') {
+	while(*src == ' ' || *src == '\t' || *src == '\n' || *src == '\r') {
 		src++;
 	}
 
@@ -101,6 +101,7 @@ void next() {
 				exit(1);
 			}
 		} while(IS_IDENT_START(*src) || IS_NUMBER(*src));
+
 		token = IDENT;
 
 		// reserved
@@ -240,9 +241,15 @@ value_t var_to_int(var_t var) {
 	value_t result = *((value_t *) var.value);
 
 	// 1 << 63/31 doesn't overflow, ignore warning
-	value_t min_two_comp = 1 << ((sizeof(void *) * 8) - 1);
+	// value_t min_two_comp = 1 << ((sizeof(void *) * 8) - 1);
+	value_t min_two_comp = 1 << ((var.type_size * 8) - 1);
 	if(!var.is_pos && result >= min_two_comp) {
-		return result - (min_two_comp * 2);
+		result -= min_two_comp * 2;
+	}
+
+	unsigned char *result_ptr = (unsigned char *)(&result);
+	for(int i = (int) sizeof(void *); i >= var.type_size; i--) {
+		result_ptr[i] = 0;
 	}
 
 	return result;
@@ -255,7 +262,7 @@ void assign_int_var(var_t *var, value_t x) {
 	}
 	
 	memset(*(var->value), 0, sizeof(var_value_t));
-	for(int i = 0; i < (int) sizeof(var_value_t); i++) {
+	for(int i = 0; i < var->type_size; i++) {
 		(*(var->value))[i] = (unsigned char)((x >> (i * 8)) & 0xff);
 	}
 }
@@ -282,7 +289,7 @@ int ident_var_index(int is_last_error) {
 	}
 
 	if(is_last_error) {
-		fprintf(stderr, "nonexistant variable\n");
+		fprintf(stderr, "nonexistent variable %s\n", ident);
 		exit(1);
 	}
 	
@@ -357,19 +364,42 @@ value_t value() {
 		case '-': expect('-'); value = -expr(); break;
 		case ':':
 			expect(':');
-			if(token != IDENT) {
-				fprintf(stderr, "a : needs to be after or before an identifier");
+			value = (value_t) vars[ident_var_index(1)].value;
+			expect(IDENT);
+			break;
+
+		case '#':
+			expect('#');
+			if(token < B8 || token > BPTR) {
+				fprintf(stderr, "when using hashtag, provide a type and then a +/-\n");
 				exit(1);
 			}
 
-			int index = ident_var_index(1);
-			value_t var_val = var_to_int(vars[index]);
-			expect(IDENT);
-			found_ident = 0;
-			return var_val;
+			int hash_size = token != BPTR
+				? int_pow(2, token - B8)
+				: (int) sizeof(void *);
+
+			next();
+			if(token != '+' && token != '-') {
+				fprintf(stderr, "you forgot to provide a +/- when using a hashtag\n");
+				exit(1);
+			}
+
+			int hash_pos = token == '+';
+			next();
+			unsigned char *address = (unsigned char *) expr();
+			value_t val = 0;
+			memset(&val, 0xff, sizeof(value_t));		
+			for(int i = 0; i < hash_size; i++) {
+				val |= address[i] >> (i * 8);
+			}
+			
+			value = val;
+			break;
 		
 		case IDENT:
-			var_t var = vars[ident_var_index(1)];
+			int index = ident_var_index(1);
+			var_t var = vars[index];
 			value = var_to_int(var);
 			memcpy(ident_copy, ident, sizeof(char) * IDENT_MAX);
 			expect(IDENT);
@@ -407,53 +437,6 @@ value_t value() {
 value_t expr_tail(value_t left_val) {
 	int index = -1;
 	switch(token) {
-		case ':':
-			expect(':');
-			if(found_ident) {
-				found_ident = 0;
-				memcpy(ident, ident_copy, sizeof(char) * IDENT_MAX);
-				index = ident_var_index(1);
-				if(token < B8 || token > B64) {
-					return expr_tail((value_t)(*(vars[index].value)));
-				}
-			}
-
-			if(token < B8 || token > B64) {
-				fprintf(stderr, "if you are going to use a colon with a number, give a type and a +/- with it\n");
-				exit(1);
-			}
-
-			int val_size = int_pow(2, token - B8);
-			next();
-			if(token != '+' && token != '-') {
-				fprintf(stderr, "if a colon is followed by a type, give a +/-\n");
-				exit(1);
-			}
-			
-			int val_pos = token == '+';
-			value_t val = found_ident
-				? *((value_t *) *((value_t *) vars[index].value))
-
-				// can't do cast or else it will get 8 bytes no matter what
-				: 0;
-
-			unsigned char *left_ptr = (unsigned char *) left_val;
-
-			// edge case handling (for above) happens here
-			if(!found_ident) {
-				for(int i = 0; i < val_size; i++) {
-					val |= (value_t)(left_ptr[i]) << (i * 8);
-				}
-			}
-			
-			value_t min_two_comp = 1 << ((val_size * 8) - 1);
-			if(!val_pos && val >= min_two_comp) {
-				return val - (min_two_comp * 2);
-			}
-
-			next();
-			return expr_tail(val);
-		
 		case '=':
 			expect('=');
 			if(found_ident) {
@@ -470,11 +453,9 @@ value_t expr_tail(value_t left_val) {
 				exit(1);
 			}
 
-			int type_size = int_pow(2, token - B8);
-			if(token == BPTR) {
-				void *test_size = NULL;
-				type_size = sizeof(test_size);
-			}
+			int type_size = token != BPTR
+				? int_pow(2, token - B8)
+				: (int) sizeof(void *);
 			
 			next();
 			value_t expr_val = expr();
@@ -529,6 +510,7 @@ void skip_block() {
 		brace_count -= token == '}';
 		next();
 	} while(brace_count > 0 && token != STOP);
+	
 	if(token == STOP) {
 		fprintf(stderr, "unmatched braces\n");
 		exit(1);
@@ -552,10 +534,13 @@ int flow_stack_size = 0;
 void stmt() {
 	int inital = token;
 	switch(inital) {
+		case STOP:
+			return;
 
 		// if one of these opers are found here it has to be unary
 		case '(':
 		case ':': 
+		case '#':
 		case '-':
 		case '~':
 		case '!':
@@ -772,13 +757,16 @@ int main() {
 	int src_size = 0;
 	while((input_char = fgetc(stdin)) != -1) {
 		src_size++;
-		src = safe_realloc(src, sizeof(char) * (src_size + 1));
+
+		// hack for whitespace, next() needs whitespace to figure out num, not eof
+		src = safe_realloc(src, sizeof(char) * (src_size + 2));
 		src[src_size - 1] = input_char;
-		src[src_size] = 0;
+		src[src_size] = '\n';
+		src[src_size + 1] = 0;
 	}
 
 	start_src = src;
-	fprintf(stderr, "\n");	
+	fprintf(stderr, "\n\ndebug log:\n");	
 	next();
 	while(token != STOP && *src && *src != -1) {
 		stmt();

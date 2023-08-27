@@ -18,4 +18,4 @@ run:
 	make clean
 	make
 	clear
-	./main
+	echo 'b32- x = -1 bptr+ y = :x #b32- y' | ./main
