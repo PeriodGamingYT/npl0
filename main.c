@@ -253,6 +253,11 @@ void print_value_bytes(const char *message, value_t value) {
 value_t var_to_int(var_t var) {
 	value_t result = *((value_t *) var.value);
 	value_t min_two_comp = 1 << ((var.type_size * 8) - 1);
+
+	// at the end of min_two_comp, after the signed digit, it's filled with ones
+	// this makes it impossible to check if something is truly negative because
+	// it has a value var can never reach
+	// the code below fixes this problem
 	unsigned char *min_comp_ptr = (unsigned char *) &min_two_comp;
 	for(int i = var.type_size; i < (int) sizeof(value_t); i++) {
 		min_comp_ptr[i] = 0;
