@@ -18,4 +18,10 @@ run:
 	make clean
 	make
 	clear
-	echo 'b32- x = -1 bptr+ y = :x #b32- y' | ./main
+	cat test.npl | ./main
+
+repl:
+	make clean
+	make
+	clear
+	./main

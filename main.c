@@ -240,22 +240,24 @@ var_value_t *var_values_add() {
 value_t var_to_int(var_t var) {
 	value_t result = *((value_t *) var.value);
 
-	// 1 << 63/31 doesn't overflow, ignore warning
-	// value_t min_two_comp = 1 << ((sizeof(void *) * 8) - 1);
+	// numbers like b32/b64 can be negative even if unsigned
+	// this code handles that edge case
 	value_t min_two_comp = 1 << ((var.type_size * 8) - 1);
-	if(!var.is_pos && result >= min_two_comp) {
+	int is_result_comp = result >= min_two_comp && min_two_comp > 0;
+	int is_neg = !var.is_pos && result >= is_result_comp;
+	if(is_neg) {
 		result -= min_two_comp * 2;
 	}
 
 	unsigned char *result_ptr = (unsigned char *)(&result);
 	for(int i = (int) sizeof(void *); i >= var.type_size; i--) {
-		result_ptr[i] = 0;
+		result_ptr[i] = 0xff * is_neg;
 	}
 
 	return result;
 }
 
-// (*(var->value))[i] parens are needed!
+// (*(var->value))[i] parens are needed
 void assign_int_var(var_t *var, value_t x) {
 	if(var->value == NULL) {
 		var->value = var_values_add();
@@ -389,11 +391,24 @@ value_t value() {
 			next();
 			unsigned char *address = (unsigned char *) expr();
 			value_t val = 0;
-			memset(&val, 0xff, sizeof(value_t));		
 			for(int i = 0; i < hash_size; i++) {
-				val |= address[i] >> (i * 8);
+				val |= address[i] << (i * 8);
 			}
-			
+
+			value_t min_two_comp = 1 << ((hash_size * 8) - 1);
+
+			// numbers like b32/b64 can be negative even if unsigned
+			// this code handles that edge case
+			int is_val_comp = val >= min_two_comp && min_two_comp > 0;
+			int is_neg = !hash_pos && (is_val_comp || val < 0);
+			unsigned char *val_ptr = (unsigned char *) &val;
+
+			// make remaining bits 0xff to turn n-bit unsigned int to 64/32 bit
+			// unsigned int.
+			for(int i = hash_size; i < (int) sizeof(value_t); i++) {
+				val_ptr[i] = 0xff * is_neg;
+			}
+
 			value = val;
 			break;
 		
@@ -546,8 +561,21 @@ void stmt() {
 		case '!':
 		case SIZEOF:
 		case IDENT:
-		
-			// XXX: saying ident followed by a block is a struct, that isn't handled
+
+			// not redunant because fallthrough.
+			if(token == IDENT) {
+				char *backtrack_src = src;
+				next();
+				if(token == '{') {
+					expect('{');
+					
+					break;
+				}
+
+				token = IDENT;
+				src = backtrack_src;
+			}
+			
 		case NUM:
 			fprintf(stderr, "expr %ld\n", expr());
 			break;
@@ -766,7 +794,7 @@ int main() {
 	}
 
 	start_src = src;
-	fprintf(stderr, "\n\ndebug log:\n");	
+	fprintf(stderr, "\ndebug log:\n");	
 	next();
 	while(token != STOP && *src && *src != -1) {
 		stmt();
