@@ -427,7 +427,6 @@ value_t value() {
 			int index = ident_var_index(1);
 			var_t var = vars[index];
 			value = var_to_int(var);
-			printf("ident %ld\n", value);
 			memcpy(ident_copy, ident, sizeof(char) * IDENT_MAX);
 			expect(IDENT);
 			found_ident = 1;
