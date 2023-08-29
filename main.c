@@ -257,10 +257,15 @@ value_t var_to_int(var_t var) {
 	for(int i = var.type_size; i < (int) sizeof(value_t); i++) {
 		min_comp_ptr[i] = 0;
 	}
-	
+
+	// numbers like b32/b64 can be negative even if unsigned
+	// this code handles that edge case
 	int is_val_comp = result >= min_two_comp && min_two_comp > 0;
 	int is_neg = !var.is_pos && (is_val_comp || result < 0);
 	unsigned char *result_ptr = (unsigned char *)(&result);
+
+	// make remaining bits 0xff to turn n-bit unsigned int to 64/32 bit
+	// unsigned int.
 	for(int i = var.type_size; i < (int) sizeof(value_t); i++) {
 		result_ptr[i] = 0xff * is_neg;
 	}
