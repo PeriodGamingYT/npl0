@@ -237,20 +237,31 @@ var_value_t *var_values_add() {
 	return &(var_values[var_values_size - 1]);
 }
 
-value_t var_to_int(var_t var) {
-	value_t result = *((value_t *) var.value);
-
-	// numbers like b32/b64 can be negative even if unsigned
-	// this code handles that edge case
-	value_t min_two_comp = 1 << ((var.type_size * 8) - 1);
-	int is_result_comp = result >= min_two_comp && min_two_comp > 0;
-	int is_neg = !var.is_pos && result >= is_result_comp;
-	if(is_neg) {
-		result -= min_two_comp * 2;
+void print_value_bytes(const char *message, value_t value) {
+	printf("value %s\n", message);
+	unsigned char *value_ptr = (unsigned char *) &value;
+	for(int i = 0; i < (int) sizeof(value_t); i++) {
+		printf("\t%d: %d\n", i, (unsigned char) value_ptr[i]);
 	}
 
+	printf("\n");
+}
+
+#define PRINT_VALUE_BYTES(_x) \
+	print_value_bytes(#_x, _x)
+
+value_t var_to_int(var_t var) {
+	value_t result = *((value_t *) var.value);
+	value_t min_two_comp = 1 << ((var.type_size * 8) - 1);
+	unsigned char *min_comp_ptr = (unsigned char *) &min_two_comp;
+	for(int i = var.type_size; i < (int) sizeof(value_t); i++) {
+		min_comp_ptr[i] = 0;
+	}
+	
+	int is_val_comp = result >= min_two_comp && min_two_comp > 0;
+	int is_neg = !var.is_pos && (is_val_comp || result < 0);
 	unsigned char *result_ptr = (unsigned char *)(&result);
-	for(int i = (int) sizeof(void *); i >= var.type_size; i--) {
+	for(int i = var.type_size; i < (int) sizeof(value_t); i++) {
 		result_ptr[i] = 0xff * is_neg;
 	}
 
@@ -416,6 +427,7 @@ value_t value() {
 			int index = ident_var_index(1);
 			var_t var = vars[index];
 			value = var_to_int(var);
+			printf("ident %ld\n", value);
 			memcpy(ident_copy, ident, sizeof(char) * IDENT_MAX);
 			expect(IDENT);
 			found_ident = 1;
