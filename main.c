@@ -59,7 +59,16 @@ int ident_index = 0;
 
 void next() {
 
-	// eof or 0
+	// whitespace
+	if(IS_STOP(*src)) {
+		token = STOP;
+		return;
+	}
+
+	while(*src == ' ' || *src == '\t' || *src == '\n' || *src == '\r') {
+		src++;
+	}
+
 	if(IS_STOP(*src)) {
 		token = STOP;
 		return;
@@ -67,14 +76,19 @@ void next() {
 
 	// comments
 	if(*src == '\\') {
+		src++;
 		while(*src != '\n' && *src != '\r' && !IS_STOP(*src)) {
 			src++;
 		}
-	}
 
-	// whitespace
-	while(*src == ' ' || *src == '\t' || *src == '\n' || *src == '\r') {
-		src++;
+		while(*src == ' ' || *src == '\t' || *src == '\n' || *src == '\r') {
+			src++;
+		}
+
+		if(IS_STOP(*src)) {
+			token = STOP;
+			return;
+		}
 	}
 
 	// integers (negatives handled by value())
@@ -418,6 +432,15 @@ value_t value() {
 
 			value_t min_two_comp = 1 << ((hash_size * 8) - 1);
 
+			/*// at the end of min_two_comp, after the signed digit, it's filled with ones
+			// this makes it impossible to check if something is truly negative because
+			// it has a value var can never reach
+			// the code below fixes this problem
+			unsigned char *min_comp_ptr = (unsigned char *) &min_two_comp;
+			for(int i = hash_size; i < (int) sizeof(value_t); i++) {
+				min_comp_ptr[i] = 0;
+			}*/
+
 			// numbers like b32/b64 can be negative even if unsigned
 			// this code handles that edge case
 			int is_val_comp = val >= min_two_comp && min_two_comp > 0;
@@ -612,9 +635,9 @@ void stmt() {
 			}
 
 		case BPTR:
-			next();			
+			next();
 			if(token != '+' && token != '-') {
-				fprintf(stderr, "type needs to be followed by a +/-\n");
+				fprintf(stderr, "when declaring, a type needs to be followed by a +/-\n");
 				exit(1);
 			}
 
@@ -751,7 +774,7 @@ void stmt() {
 			break;
 
 		default:
-			fprintf(stderr, "unimplemented statement\n");
+			fprintf(stderr, "unimplemented statement %d:%c index %d\n", inital, inital, (int)(src - start_src));
 			exit(1);
 	}
 }
