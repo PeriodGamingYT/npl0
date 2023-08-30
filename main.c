@@ -1,3 +1,17 @@
+// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
+// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
+// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
+// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
+// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
+// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
+// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
+// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
+// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
+// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
+// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
+// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
+// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -363,6 +377,89 @@ void var_scope_remove() {
 	var_scopes = safe_realloc(var_scopes, sizeof(int) * var_scopes_size);
 }
 
+// structs
+typedef struct {
+	int size;
+	int *is_pos;
+	int *type_size;
+	char **name;
+	char *struct_name;
+} struct_def_t;
+
+struct_def_t **struct_stack = NULL;
+int struct_stack_size = 0;
+int is_struct_def(char *name) {
+	for(int i = 0; i < struct_stack_size; i++) {
+		if(strcmp(struct_stack[i]->struct_name, name) == 0) {
+			return i;
+		}
+	}
+
+	return 0;
+}
+
+struct_def_t *make_struct_def() {
+	struct_def_t *result = malloc(sizeof(struct_def_t));
+	*result = (struct_def_t) {
+		0,
+		NULL,
+		NULL,
+		NULL,
+		NULL
+	};
+	
+	return result;
+}
+
+void free_struct_def(struct_def_t **struct_def) {
+	if(struct_def == NULL || *struct_def == NULL) {
+		return;
+	}
+
+	if((*struct_def)->is_pos != NULL) {
+		free((*struct_def)->is_pos);
+		(*struct_def)->is_pos = NULL;
+	}
+
+	if((*struct_def)->type_size != NULL) {
+		free((*struct_def)->type_size);
+		(*struct_def)->type_size = NULL;
+	}
+
+	if((*struct_def)->name != NULL) {
+		for(int i = 0; i < (*struct_def)->size; i++) {
+			if((*struct_def)->name[i] != NULL) {
+				free((*struct_def)->name[i]);
+				(*struct_def)->name[i] = NULL;
+			}
+		}
+
+		free((*struct_def)->name);
+		(*struct_def)->name = NULL;
+	}
+
+	if((*struct_def)->struct_name != NULL) {
+		free((*struct_def)->struct_name);
+		(*struct_def)->struct_name = NULL;
+	}
+
+	(*struct_def)->size = 0;
+	*struct_def = NULL;
+}
+
+void add_struct_def(struct_def_t *struct_def, var_t var) {
+	struct_def->size++;
+	struct_def->is_pos = realloc(struct_def->is_pos, sizeof(int) * struct_def->size);
+	struct_def->type_size = realloc(struct_def->type_size, sizeof(int) * struct_def->size);
+	struct_def->name = realloc(struct_def->name, sizeof(char *) * struct_def->size);	
+	struct_def->is_pos[struct_def->size - 1] = var.is_pos;
+	struct_def->type_size[struct_def->size - 1] = var.type_size;
+	int name_size = strlen(var.name);
+	struct_def->name[struct_def->size - 1] = malloc(name_size + 1);
+	memcpy(struct_def->name[struct_def->size - 1], var.name, name_size);
+	struct_def->name[struct_def->size - 1][name_size] = 0;
+}
+
 // expr parsing
 int int_pow(int base, int exp) {
 	if(exp == 0) {
@@ -405,8 +502,8 @@ value_t value() {
 			expect(IDENT);
 			break;
 
-		case '#':
-			expect('#');
+		case '@':
+			expect('@');
 			if(token < B8 || token > BPTR) {
 				fprintf(stderr, "when using hashtag, provide a type and then a +/-\n");
 				exit(1);
@@ -414,7 +511,7 @@ value_t value() {
 
 			int hash_size = token != BPTR
 				? int_pow(2, token - B8)
-				: (int) sizeof(void *);
+				: (int) sizeof(value_t);
 
 			next();
 			if(token != '+' && token != '-') {
@@ -599,7 +696,7 @@ void stmt() {
 		// if one of these opers are found here it has to be unary
 		case '(':
 		case ':': 
-		case '#':
+		case '@':
 		case '-':
 		case '~':
 		case '!':
@@ -612,7 +709,47 @@ void stmt() {
 				next();
 				if(token == '{') {
 					expect('{');
+					struct_def_t *new_struct = make_struct_def();
+					char *temp_src = src;
+					src = backtrack_src;
+					next();
+					int ident_size = strlen(ident);
+					new_struct->struct_name = malloc(ident_size + 1);
+					memcpy(new_struct->struct_name, ident, ident_size);
+					new_struct->struct_name[ident_size] = 0;
+					src = temp_src;
+					while(token != '}' && token != STOP) {
+						int type_size = token != BPTR
+							? int_pow(token - B8, 2)
+							: (int) sizeof(value_t);
+
+						next();
+						if(token != '+' && token != '-') {
+							fprintf(stderr, "you forgot to provide a +/- when declaring a struct\n");
+							exit(1);
+						}
+
+						int is_pos = token == '+';
+						next();
+						add_struct_def(new_struct, (var_t) {
+							ident,
+							type_size,
+							is_pos,
+							NULL
+						});
+
+						next();
+					}
+
+					struct_stack_size++;
+					struct_stack = safe_realloc(struct_stack, sizeof(struct_def_t *) * struct_stack_size);
+					struct_stack[struct_stack_size - 1] = new_struct;
+					next();
 					break;
+				}
+
+				if(is_struct_def(ident)) {
+					
 				}
 
 				token = IDENT;
@@ -816,6 +953,20 @@ void free_vars() {
 	free(start_src);
 	src = NULL;
 	start_src = NULL;
+	if(struct_stack != NULL) {
+		for(int i = 0; i < struct_stack_size; i++) {
+			if(struct_stack[i] == NULL) {
+				continue;
+			}
+
+			free_struct_def(&struct_stack[i]);
+		}
+
+		free(struct_stack);
+	}
+
+	struct_stack = NULL;
+	struct_stack_size = 0;
 }
 
 int main() {

@@ -1,3 +1,10 @@
-b32- x = -1
-x
-#b32- :x
+test {
+	b8+ a
+	b32+ b
+}
+
+test a
+a.a = 2
+a.a
+a.b = 69420
+a.b
