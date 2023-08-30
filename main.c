@@ -612,7 +612,6 @@ void stmt() {
 				next();
 				if(token == '{') {
 					expect('{');
-					
 					break;
 				}
 
