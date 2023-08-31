@@ -61,6 +61,21 @@ enum {
 	ARRAY_PUSH_UNDEF(_x, _y); \
 	_x[_x##_size - 1] = _z
 
+#define NULL_RETURN_REF(_x) \
+	if(_x == NULL || *_x == NULL) { \
+		return; \
+	}
+
+#define NOT_NULL_FREE(_x) \
+	if(_x != NULL) { \
+		free(_x); \
+		_x = NULL; \
+	}
+
+#define NOT_NULL_FREE_SIZE(_x) \
+	NOT_NULL_FREE(_x); \
+	_x##_size = 0;
+
 // globals
 typedef intptr_t value_t;
 int token = 0;
@@ -411,37 +426,19 @@ struct_def_t *make_struct_def() {
 }
 
 void free_struct_def(struct_def_t **struct_def) {
-	if(struct_def == NULL || *struct_def == NULL) {
-		return;
-	}
-
-	if((*struct_def)->is_pos != NULL) {
-		free((*struct_def)->is_pos);
-		(*struct_def)->is_pos = NULL;
-	}
-
-	if((*struct_def)->type_size != NULL) {
-		free((*struct_def)->type_size);
-		(*struct_def)->type_size = NULL;
-	}
-
+	NULL_RETURN_REF(struct_def);
+	NOT_NULL_FREE((*struct_def)->is_pos);
+	NOT_NULL_FREE((*struct_def)->type_size);
 	if((*struct_def)->name != NULL) {
 		for(int i = 0; i < (*struct_def)->size; i++) {
-			if((*struct_def)->name[i] != NULL) {
-				free((*struct_def)->name[i]);
-				(*struct_def)->name[i] = NULL;
-			}
+			NOT_NULL_FREE((*struct_def)->name[i]);
 		}
 
 		free((*struct_def)->name);
 		(*struct_def)->name = NULL;
 	}
 
-	if((*struct_def)->struct_name != NULL) {
-		free((*struct_def)->struct_name);
-		(*struct_def)->struct_name = NULL;
-	}
-
+	NOT_NULL_FREE((*struct_def)->struct_name);
 	(*struct_def)->size = 0;
 	*struct_def = NULL;
 }
@@ -908,24 +905,9 @@ void stmt() {
 
 // main
 void free_vars() {
-	if(var_values != NULL) {
-		free(var_values);
-	}
-	
-	var_values = NULL;
-	var_values_size = 0;
-	if(var_scopes != NULL) {
-		free(var_scopes);
-	}
-	
-	var_scopes = NULL;
-	var_scopes_size = 0;
-	if(flow_stack != NULL) {
-		free(flow_stack);
-	}
-
-	flow_stack = NULL;
-	flow_stack_size = 0;
+	NOT_NULL_FREE_SIZE(var_values);
+	NOT_NULL_FREE_SIZE(var_scopes);
+	NOT_NULL_FREE_SIZE(flow_stack);
 	for(int i = 0; i < vars_size && vars != NULL; i++) {
 		if(vars[i].name == NULL) {
 			continue;
@@ -935,21 +917,12 @@ void free_vars() {
 		vars[i].name = NULL;
 	}
 
-	if(vars != NULL) {
-		free(vars);
-	}
-
-	vars = NULL;
-	vars_size = 0;
+	NOT_NULL_FREE_SIZE(vars);
 	free(start_src);
 	src = NULL;
 	start_src = NULL;
 	if(struct_stack != NULL) {
 		for(int i = 0; i < struct_stack_size; i++) {
-			if(struct_stack[i] == NULL) {
-				continue;
-			}
-
 			free_struct_def(&struct_stack[i]);
 		}
 
