@@ -3,9 +3,6 @@
 #include <string.h>
 #include <stdint.h>
 
-#define H(_x) \
-	fprintf(stderr, "hit%s\n", #_x);
-
 // tokens
 enum { 
 	NUM, 
@@ -35,6 +32,9 @@ enum {
 };
 
 // macros
+#define H(_x) \
+	fprintf(stderr, "hit%s\n", #_x);
+
 #define IS_IDENT_START(_x) \
 	((_x >= 'A' && _x <= 'Z') || (_x >= 'a' && _x <= 'z') || (_x == '_'))
 
