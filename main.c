@@ -1,17 +1,3 @@
-// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
-// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
-// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
-// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
-// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
-// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
-// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
-// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
-// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
-// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
-// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
-// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
-// XXX!!!!: CLEAN UP CODE NATHAN!!!!!!
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +6,7 @@
 #define H(_x) \
 	fprintf(stderr, "hit%s\n", #_x);
 
-// lexing
+// tokens
 enum { 
 	NUM, 
 	STOP, 
@@ -48,17 +34,7 @@ enum {
 	ELSE
 };
 
-typedef intptr_t value_t;
-int token = 0;
-value_t token_val = 0;
-char *src = NULL;
-char *start_src = NULL;
-char *buffer_ptr = NULL;
-
-// 32 (actually 31 because of null term) is plenty, if you need more than that, you're screwed anyway
-#define IDENT_MAX 32
-char ident[IDENT_MAX] = { 0 };
-int ident_index = 0;
+// macros
 #define IS_IDENT_START(_x) \
 	((_x >= 'A' && _x <= 'Z') || (_x >= 'a' && _x <= 'z') || (_x == '_'))
 
@@ -71,6 +47,33 @@ int ident_index = 0;
 #define ARRAY_SIZE(_x) \
 	((int)(sizeof(_x) / sizeof((_x)[0])))
 
+#define IS_WHITESPACE(_x) \
+	((_x) == ' ' || (_x) == '\t' || (_x) == '\n' || (_x) == '\r')
+
+#define IS_NEWLINE(_x) \
+	((_x) == '\n' || (_x) == '\r')
+
+#define ARRAY_PUSH_UNDEF(_x, _y) \
+	_x##_size++; \
+	_x = safe_realloc(_x, sizeof(_y) * _x##_size)
+
+#define ARRAY_PUSH(_x, _y, _z) \
+	ARRAY_PUSH_UNDEF(_x, _y); \
+	_x[_x##_size - 1] = _z
+
+// globals
+typedef intptr_t value_t;
+int token = 0;
+value_t token_val = 0;
+char *src = NULL;
+char *start_src = NULL;
+char *buffer_ptr = NULL;
+
+// lexing
+// 32 (actually 31 because of null term) is plenty, if you need more than that, you're screwed anyway
+#define IDENT_MAX 32
+char ident[IDENT_MAX] = { 0 };
+int ident_index = 0;
 void next() {
 
 	// whitespace
@@ -79,7 +82,7 @@ void next() {
 		return;
 	}
 
-	while(*src == ' ' || *src == '\t' || *src == '\n' || *src == '\r') {
+	while(IS_WHITESPACE(*src)) {
 		src++;
 	}
 
@@ -91,11 +94,11 @@ void next() {
 	// comments
 	if(*src == '\\') {
 		src++;
-		while(*src != '\n' && *src != '\r' && !IS_STOP(*src)) {
+		while(IS_NEWLINE(*src) && !IS_STOP(*src)) {
 			src++;
 		}
 
-		while(*src == ' ' || *src == '\t' || *src == '\n' || *src == '\r') {
+		while(IS_WHITESPACE(*src)) {
 			src++;
 		}
 
@@ -259,8 +262,7 @@ typedef struct var_s {
 var_value_t *var_values = NULL;
 int var_values_size = 0;
 var_value_t *var_values_add() {
-	var_values_size++;
-	var_values = safe_realloc(var_values, sizeof(var_value_t) * var_values_size);
+	ARRAY_PUSH_UNDEF(var_values, var_value_t);
 	memset(var_values[var_values_size - 1], 0, sizeof(var_value_t));
 	return &(var_values[var_values_size - 1]);
 }
@@ -298,7 +300,7 @@ value_t var_to_int(var_t var) {
 	unsigned char *result_ptr = (unsigned char *)(&result);
 
 	// make remaining bits 0xff to turn n-bit unsigned int to 64/32 bit
-	// unsigned int.
+	// unsigned int
 	for(int i = var.type_size; i < (int) sizeof(value_t); i++) {
 		result_ptr[i] = 0xff * is_neg;
 	}
@@ -323,8 +325,7 @@ int vars_size = 0;
 int *var_scopes = NULL;
 int var_scopes_size = 0;
 void ident_var_add() {
-	vars_size++;
-	vars = safe_realloc(vars, sizeof(var_t) * vars_size);
+	ARRAY_PUSH_UNDEF(vars, var_t);
 	int ident_size = strlen(ident);
 	vars[vars_size - 1].name = safe_malloc(sizeof(char) * (ident_size + 1));
 	memcpy(vars[vars_size - 1].name, ident, sizeof(char) * ident_size);
@@ -349,9 +350,7 @@ int ident_var_index(int is_last_error) {
 }
 
 void var_scope_add() {
-	var_scopes_size++;
-	var_scopes = safe_realloc(var_scopes, sizeof(int) * var_scopes_size);
-	var_scopes[var_scopes_size - 1] = 0;
+	ARRAY_PUSH(var_scopes, int, 0);
 }
 
 void var_scope_remove() {
@@ -741,15 +740,13 @@ void stmt() {
 						next();
 					}
 
-					struct_stack_size++;
-					struct_stack = safe_realloc(struct_stack, sizeof(struct_def_t *) * struct_stack_size);
-					struct_stack[struct_stack_size - 1] = new_struct;
+					ARRAY_PUSH(struct_stack, struct_def_t, new_struct);
 					next();
 					break;
 				}
 
 				if(is_struct_def(ident)) {
-					
+					// XXX: TODO.					
 				}
 
 				token = IDENT;
@@ -811,9 +808,7 @@ void stmt() {
 				0
 			};
 
-			flow_stack_size++;
-			flow_stack = safe_realloc(flow_stack, sizeof(flow_t) * flow_stack_size);
-			flow_stack[flow_stack_size - 1] = flow;
+			ARRAY_PUSH(flow_stack, flow_t, flow);
 			if(!result) {
 				skip_block();
 				break;
@@ -848,9 +843,7 @@ void stmt() {
 					0
 				};
 
-				flow_stack_size++;
-				flow_stack = safe_realloc(flow_stack, sizeof(flow_t) * flow_stack_size);
-				flow_stack[flow_stack_size - 1] = flow;
+				ARRAY_PUSH(flow_stack, flow_t, flow);
 				if(!result) {
 					break;
 				}
@@ -873,9 +866,7 @@ void stmt() {
 					0
 				};
 
-				flow_stack_size++;
-				flow_stack = safe_realloc(flow_stack, sizeof(flow_t) * flow_stack_size);				
-				flow_stack[flow_stack_size - 1] = loop_flow;
+				ARRAY_PUSH(flow_stack, flow_t, loop_flow);
 			}
 
 			expect(LOOP);
