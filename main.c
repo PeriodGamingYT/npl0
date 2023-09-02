@@ -186,7 +186,7 @@ void next() {
 		};
 
 		for(int i = 0; i < ARRAY_SIZE(reserved); i++) {
-			if(strcmp(reserved[i], ident) == 0) {
+			if(!strcmp(reserved[i], ident)) {
 				memset(ident, 0, sizeof(char) * IDENT_MAX);
 				token = new_reserved[i];
 				return;
@@ -231,7 +231,7 @@ int expect(char x) {
 	next();
 }
 
-// variables
+// memory alloc
 void *safe_realloc(void *ptr, unsigned int size) {
 	if(size <= 0) {
 		free(ptr);
@@ -265,15 +265,168 @@ void *safe_malloc(unsigned int size) {
 	return temp;
 }
 
+// structs
+typedef struct {
+	int size;
+	int *is_pos;
+	int *type_size;
+	char **name;
+	char *struct_name;
+} struct_def_t;
+
+void print_struct_def(struct_def_t *struct_def) {
+	if(struct_def == NULL) {
+		fprintf(stderr, "struct_def is null\n");
+		return;
+	}
+	
+	fprintf(stderr, "struct_def\n");
+	fprintf(stderr, "size %d\n", struct_def->size);
+	fprintf(stderr, "struct_name %s\n", struct_def->struct_name);
+	for(int i = 0; i < struct_def->size; i++) {
+		fprintf(stderr, "is_pos %d: %d\n", i, struct_def->is_pos[i]);
+		fprintf(stderr, "type_size %d: %d\n", i, struct_def->type_size[i]);
+		fprintf(stderr, "name %d: %s\n", i, struct_def->name[i]);
+	}
+
+	fprintf(stderr, "\n");
+}
+
+// part of vars
 #define VALUE_MAX 8
 typedef unsigned char var_value_t[VALUE_MAX];
+typedef struct {
+	struct_def_t *struct_def;
+	var_value_t *vals;
+	char *name;
+} struct_val_t;
+
+void print_struct_val(struct_val_t *struct_val) {
+	if(struct_val == NULL) {
+		fprintf(stderr, "struct_val is null\n\n");
+		return;
+	}
+	
+	fprintf(stderr, "struct_val\n");
+	print_struct_def(struct_val->struct_def);
+	if(struct_val->struct_def == NULL) {
+		fprintf(stderr, "struct_def in struct_val is null\n\n");
+	}
+	
+	for(int i = 0; struct_val->struct_def != NULL && i < struct_val->struct_def->size; i++) {
+		fprintf(stderr, "vals %d: %ld\n", i, (value_t)(struct_val->vals[i]));
+	}
+
+	fprintf(stderr, "name %s\n\n", struct_val->name);
+}
+
+void free_struct_vals(struct_val_t **struct_val) {
+	NULL_RETURN_REF(struct_val);
+	NOT_NULL_FREE((*struct_val)->vals);
+	NOT_NULL_FREE((*struct_val)->name);
+	NOT_NULL_FREE(*struct_val);
+}
+
+int struct_val_prop(struct_val_t *struct_val, char *name) {
+	for(int i = 0; i < struct_val->struct_def->size; i++) {
+		if(!strcmp(struct_val->struct_def->name[i], name)) {
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+struct_val_t *make_struct_val(struct_def_t *struct_def, char *name) {
+	if(struct_def == NULL) {
+		fprintf(stderr, "make_struct_val(), struct_def arg is null\n");
+		exit(1);
+	}
+	
+	struct_val_t *struct_val = safe_malloc(sizeof(struct_val_t));
+	struct_val->struct_def = struct_def;
+	struct_val->vals = safe_malloc(sizeof(var_value_t) * struct_def->size);
+	memset(struct_val->vals, 0, sizeof(var_value_t) * struct_def->size);
+	int name_length = strlen(name) + 1;
+	struct_val->name = safe_malloc(name_length);
+	memcpy(struct_val->name, name, name_length - 1);
+	struct_val->name[name_length - 1] = 0;
+	return struct_val;
+}
+
+void free_struct_val(struct_val_t **struct_val) {
+	NULL_RETURN_REF(struct_val);
+	NOT_NULL_FREE((*struct_val)->vals);
+	NOT_NULL_FREE((*struct_val)->name);
+	NOT_NULL_FREE(*struct_val);
+}
+
+struct_def_t **struct_stack = NULL;
+int struct_stack_size = 0;
+int index_struct_def(char *name) {
+	for(int i = 0; i < struct_stack_size; i++) {
+		if(!strcmp(struct_stack[i]->struct_name, name)) {
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+struct_def_t *make_struct_def() {
+	struct_def_t *result = safe_malloc(sizeof(struct_def_t));
+	*result = (struct_def_t) {
+		0,
+		NULL,
+		NULL,
+		NULL,
+		NULL
+	};
+	
+	return result;
+}
+
+void free_struct_def(struct_def_t **struct_def) {
+	NULL_RETURN_REF(struct_def);
+	NOT_NULL_FREE((*struct_def)->is_pos);
+	NOT_NULL_FREE((*struct_def)->type_size);
+	if((*struct_def)->name != NULL) {
+		for(int i = 0; i < (*struct_def)->size; i++) {
+			NOT_NULL_FREE((*struct_def)->name[i]);
+		}
+
+		free((*struct_def)->name);
+		(*struct_def)->name = NULL;
+	}
+
+	NOT_NULL_FREE((*struct_def)->struct_name);
+	(*struct_def)->size = 0;
+	NOT_NULL_FREE(*struct_def);
+}
+
+// other part of vars
 typedef struct var_s {
 	char *name;
 	int type_size;
 	int is_pos;
 	var_value_t *value;
+	struct_val_t *struct_val;
 } var_t;
 
+void add_struct_def(struct_def_t *struct_def, var_t var) {
+	struct_def->size++;
+	struct_def->is_pos = safe_realloc(struct_def->is_pos, sizeof(int) * struct_def->size);
+	struct_def->type_size = safe_realloc(struct_def->type_size, sizeof(int) * struct_def->size);
+	struct_def->name = safe_realloc(struct_def->name, sizeof(char *) * struct_def->size);	
+	struct_def->is_pos[struct_def->size - 1] = var.is_pos;
+	struct_def->type_size[struct_def->size - 1] = var.type_size;
+	int name_size = strlen(var.name);
+	struct_def->name[struct_def->size - 1] = safe_malloc(name_size + 1);
+	memcpy(struct_def->name[struct_def->size - 1], var.name, name_size);
+	struct_def->name[struct_def->size - 1][name_size] = 0;
+}
+
+// rest of vars
 var_value_t *var_values = NULL;
 int var_values_size = 0;
 var_value_t *var_values_add() {
@@ -283,19 +436,25 @@ var_value_t *var_values_add() {
 }
 
 void print_value_bytes(const char *message, value_t value) {
-	printf("value %s\n", message);
+	fprintf(stderr, "value %s\n", message);
 	unsigned char *value_ptr = (unsigned char *) &value;
 	for(int i = 0; i < (int) sizeof(value_t); i++) {
-		printf("\t%d: %d\n", i, (unsigned char) value_ptr[i]);
+		fprintf(stderr, "\t%d: %d\n", i, (unsigned char) value_ptr[i]);
 	}
 
-	printf("\n");
+	fprintf(stderr, "\n");
 }
 
 #define PRINT_VALUE_BYTES(_x) \
 	print_value_bytes(#_x, _x)
 
 value_t var_to_int(var_t var) {
+	if(var.value == NULL) {
+
+		// this is a struct, don't handle idents here.
+		return 0;
+	}
+	
 	value_t result = *((value_t *) var.value);
 	value_t min_two_comp = 1 << ((var.type_size * 8) - 1);
 
@@ -343,14 +502,23 @@ void ident_var_add() {
 	ARRAY_PUSH_UNDEF(vars, var_t);
 	int ident_size = strlen(ident);
 	vars[vars_size - 1].name = safe_malloc(sizeof(char) * (ident_size + 1));
-	memcpy(vars[vars_size - 1].name, ident, sizeof(char) * ident_size);
+	memcpy(vars[vars_size - 1].name, ident, ident_size);
 	vars[vars_size - 1].name[ident_size] = 0;
 	var_scopes[var_scopes_size - 1]++;
 }
 
 int ident_var_index(int is_last_error) {
+	if(ident == NULL) {
+		fprintf(stderr, "ident_var_index stopped program because ident was null\n");
+		exit(1);
+	}
+
 	for(int i = 0; i < vars_size; i++) {
-		if(strcmp(vars[i].name, ident) == 0) {
+		if(vars[i].name == NULL) {
+			continue;
+		}
+		
+		if(!strcmp(vars[i].name, ident)) {
 			return i;
 		}
 	}
@@ -391,70 +559,11 @@ void var_scope_remove() {
 	var_scopes = safe_realloc(var_scopes, sizeof(int) * var_scopes_size);
 }
 
-// structs
 typedef struct {
-	int size;
-	int *is_pos;
-	int *type_size;
-	char **name;
-	char *struct_name;
-} struct_def_t;
-
-struct_def_t **struct_stack = NULL;
-int struct_stack_size = 0;
-int is_struct_def(char *name) {
-	for(int i = 0; i < struct_stack_size; i++) {
-		if(strcmp(struct_stack[i]->struct_name, name) == 0) {
-			return i;
-		}
-	}
-
-	return 0;
-}
-
-struct_def_t *make_struct_def() {
-	struct_def_t *result = malloc(sizeof(struct_def_t));
-	*result = (struct_def_t) {
-		0,
-		NULL,
-		NULL,
-		NULL,
-		NULL
-	};
-	
-	return result;
-}
-
-void free_struct_def(struct_def_t **struct_def) {
-	NULL_RETURN_REF(struct_def);
-	NOT_NULL_FREE((*struct_def)->is_pos);
-	NOT_NULL_FREE((*struct_def)->type_size);
-	if((*struct_def)->name != NULL) {
-		for(int i = 0; i < (*struct_def)->size; i++) {
-			NOT_NULL_FREE((*struct_def)->name[i]);
-		}
-
-		free((*struct_def)->name);
-		(*struct_def)->name = NULL;
-	}
-
-	NOT_NULL_FREE((*struct_def)->struct_name);
-	(*struct_def)->size = 0;
-	*struct_def = NULL;
-}
-
-void add_struct_def(struct_def_t *struct_def, var_t var) {
-	struct_def->size++;
-	struct_def->is_pos = realloc(struct_def->is_pos, sizeof(int) * struct_def->size);
-	struct_def->type_size = realloc(struct_def->type_size, sizeof(int) * struct_def->size);
-	struct_def->name = realloc(struct_def->name, sizeof(char *) * struct_def->size);	
-	struct_def->is_pos[struct_def->size - 1] = var.is_pos;
-	struct_def->type_size[struct_def->size - 1] = var.type_size;
-	int name_size = strlen(var.name);
-	struct_def->name[struct_def->size - 1] = malloc(name_size + 1);
-	memcpy(struct_def->name[struct_def->size - 1], var.name, name_size);
-	struct_def->name[struct_def->size - 1][name_size] = 0;
-}
+	var_value_t *value;
+	int type_size;
+	int is_pos;
+} var_def_t;
 
 // expr parsing
 int int_pow(int base, int exp) {
@@ -475,8 +584,10 @@ int int_pow(int base, int exp) {
 char ident_copy[IDENT_MAX] = { 0 };
 value_t expr();
 int found_ident = 0;
+struct_val_t *current_struct_val = NULL;
+var_def_t struct_prop_def = { NULL, 0, 0 };
 value_t value() {
-	value_t value = 0;
+	value_t eval_value = 0;
 	if(token == STOP || !(*src) || *src == -1) {
 		fprintf(stderr, "can't find a token to get value of, found end of file instead\n");
 		exit(1);
@@ -485,16 +596,16 @@ value_t value() {
 	switch(token) {
 		case '(':
 			expect('(');
-			value = expr();
+			eval_value = expr();
 			expect(')');
 			break;
 
-		case '!': expect('!'); value = !expr(); break;
-		case '~': expect('~'); value = ~expr(); break;
-		case '-': expect('-'); value = -expr(); break;
+		case '!': expect('!'); eval_value = !expr(); break;
+		case '~': expect('~'); eval_value = ~expr(); break;
+		case '-': expect('-'); eval_value = -expr(); break;
 		case ':':
 			expect(':');
-			value = (value_t) vars[ident_var_index(1)].value;
+			eval_value = (value_t) vars[ident_var_index(1)].value;
 			expect(IDENT);
 			break;
 
@@ -525,15 +636,6 @@ value_t value() {
 
 			value_t min_two_comp = 1 << ((hash_size * 8) - 1);
 
-			/*// at the end of min_two_comp, after the signed digit, it's filled with ones
-			// this makes it impossible to check if something is truly negative because
-			// it has a value var can never reach
-			// the code below fixes this problem
-			unsigned char *min_comp_ptr = (unsigned char *) &min_two_comp;
-			for(int i = hash_size; i < (int) sizeof(value_t); i++) {
-				min_comp_ptr[i] = 0;
-			}*/
-
 			// numbers like b32/b64 can be negative even if unsigned
 			// this code handles that edge case
 			int is_val_comp = val >= min_two_comp && min_two_comp > 0;
@@ -546,16 +648,60 @@ value_t value() {
 				val_ptr[i] = 0xff * is_neg;
 			}
 
-			value = val;
+			eval_value = val;
 			break;
 		
 		case IDENT:
+			if(current_struct_val != NULL) {
+				memcpy(ident_copy, ident, IDENT_MAX);
+				expect(IDENT);
+				int prop_index = struct_val_prop(current_struct_val, ident_copy);
+				if(prop_index == -1) {
+					print_struct_val(current_struct_val);
+					fprintf(stderr, "tried to access nonexistant structure property\n");
+					exit(1);
+				}
+
+				if(token != '.') {
+					var_t var = {
+						NULL,
+						current_struct_val->struct_def->type_size[prop_index],
+						current_struct_val->struct_def->is_pos[prop_index],
+						(unsigned char (*)[8])(current_struct_val->vals[prop_index]),
+						NULL
+					};
+
+					eval_value = var_to_int(var);
+					struct_prop_def = (var_def_t) {
+						var.value,
+						var.type_size,
+						var.is_pos
+					};
+
+					current_struct_val = NULL;
+					break;
+				}
+
+				current_struct_val = (struct_val_t *) current_struct_val->vals[prop_index];
+				value();
+				break;
+			}
+						
 			int index = ident_var_index(1);
 			var_t var = vars[index];
-			value = var_to_int(var);
-			memcpy(ident_copy, ident, sizeof(char) * IDENT_MAX);
+			eval_value = var_to_int(var);
+			memcpy(ident_copy, ident, IDENT_MAX);
 			expect(IDENT);
 			found_ident = 1;
+			if(token == '.' && var.struct_val != NULL) {
+				current_struct_val = var.struct_val;
+				next();
+				value();
+			} else if(token == '.') {
+				fprintf(stderr, "tried to access a variable as a struct when it is not\n");
+				exit(1);
+			}
+			
 			break;
 
 		case SIZEOF:
@@ -572,28 +718,40 @@ value_t value() {
 				type_size = sizeof(test_size);
 			}
 
-			value = type_size;
+			eval_value = type_size;
 			next();
 			expect(']');
 			break;
 
 		default:
-			value = token_val;
+			eval_value = token_val;
 			expect(NUM);
 			break;
 	}
 
-	return value;
+	return eval_value;
 }
 
 value_t expr_tail(value_t left_val) {
 	int index = -1;
 	switch(token) {
+		
+		// XXX: Handle assigning for structs and struct props
 		case '=':
 			expect('=');
+			if(struct_prop_def.value != NULL) {
+				unsigned char *ptr = (unsigned char *) struct_prop_def.value;
+				value_t expr_val = expr();
+				for(int i = 0; i < struct_prop_def.type_size; i++) {
+					ptr[i] = (unsigned char)((expr_val >> (i * 8)) & 0xff);
+				}
+				
+				break;
+			}
+			
 			if(found_ident) {
 				found_ident = 0;
-				memcpy(ident, ident_copy, sizeof(char) * IDENT_MAX);
+				memcpy(ident, ident_copy, IDENT_MAX);
 				index = ident_var_index(1);
 				value_t temp_expr = expr();
 				assign_int_var(&(vars[index]), temp_expr);
@@ -701,22 +859,24 @@ void stmt() {
 
 			// not redunant because fallthrough.
 			if(token == IDENT) {
+				memcpy(ident_copy, ident, IDENT_MAX);
 				char *backtrack_src = src;
 				next();
 				if(token == '{') {
 					expect('{');
+					memcpy(ident, ident_copy, IDENT_MAX);
 					struct_def_t *new_struct = make_struct_def();
 					char *temp_src = src;
 					src = backtrack_src;
 					next();
 					int ident_size = strlen(ident);
-					new_struct->struct_name = malloc(ident_size + 1);
+					new_struct->struct_name = safe_malloc(ident_size + 1);
 					memcpy(new_struct->struct_name, ident, ident_size);
 					new_struct->struct_name[ident_size] = 0;
 					src = temp_src;
 					while(token != '}' && token != STOP) {
 						int type_size = token != BPTR
-							? int_pow(token - B8, 2)
+							? int_pow(2, token - B8)
 							: (int) sizeof(value_t);
 
 						next();
@@ -731,21 +891,33 @@ void stmt() {
 							ident,
 							type_size,
 							is_pos,
+							NULL,
 							NULL
 						});
 
 						next();
 					}
 
-					ARRAY_PUSH(struct_stack, struct_def_t, new_struct);
+					ARRAY_PUSH(struct_stack, struct_def_t *, new_struct);
 					next();
 					break;
 				}
 
-				if(is_struct_def(ident)) {
-					// XXX: TODO.					
+				token = IDENT;
+				src = backtrack_src;
+				next();
+				int struct_index = index_struct_def(ident_copy);
+				if(struct_index != -1) {
+					struct_val_t *struct_val = make_struct_val(struct_stack[struct_index], ident);
+					ident_var_add();
+					vars[vars_size - 1].type_size = 0;
+					vars[vars_size - 1].is_pos = 0;
+					vars[vars_size - 1].value = NULL;
+					vars[vars_size - 1].struct_val = struct_val;
+					next();
+					break;
 				}
-
+				
 				token = IDENT;
 				src = backtrack_src;
 			}
@@ -786,6 +958,7 @@ void stmt() {
 			
 			vars[vars_size - 1].is_pos = is_pos;
 			vars[vars_size - 1].value = NULL;
+			vars[vars_size - 1].struct_val = NULL;
 			next();
 
 			// XXX: functions use '[', not accounted for
@@ -905,16 +1078,24 @@ void stmt() {
 
 // main
 void free_vars() {
+	// not freeing stuff but this is the exit function so that's why it's here
+	int line = 1;
+	char *temp_src = start_src;
+	for(; temp_src != src; temp_src++) {
+		line += *temp_src == '\n';
+	}
+	
+	fprintf(stderr, "this exit happened on line %d\n", line);
 	NOT_NULL_FREE_SIZE(var_values);
 	NOT_NULL_FREE_SIZE(var_scopes);
 	NOT_NULL_FREE_SIZE(flow_stack);
 	for(int i = 0; i < vars_size && vars != NULL; i++) {
-		if(vars[i].name == NULL) {
-			continue;
+		if(vars[i].name != NULL) {
+			free(vars[i].name);
 		}
 		
-		free(vars[i].name);
 		vars[i].name = NULL;
+		free_struct_val(&(vars[i].struct_val));
 	}
 
 	NOT_NULL_FREE_SIZE(vars);
