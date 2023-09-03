@@ -5,7 +5,7 @@
 
 // tokens
 enum { 
-	NUM, 
+	NUM = 0, 
 	STOP, 
 	EQ, 
 	MORE_EQ, 
@@ -667,7 +667,7 @@ value_t value() {
 						NULL,
 						current_struct_val->struct_def->type_size[prop_index],
 						current_struct_val->struct_def->is_pos[prop_index],
-						(unsigned char (*)[8])(current_struct_val->vals[prop_index]),
+						&((current_struct_val->vals[prop_index])),
 						NULL
 					};
 
@@ -696,7 +696,7 @@ value_t value() {
 			if(token == '.' && var.struct_val != NULL) {
 				current_struct_val = var.struct_val;
 				next();
-				value();
+				eval_value = value();
 			} else if(token == '.') {
 				fprintf(stderr, "tried to access a variable as a struct when it is not\n");
 				exit(1);
@@ -734,9 +734,7 @@ value_t value() {
 
 value_t expr_tail(value_t left_val) {
 	int index = -1;
-	switch(token) {
-		
-		// XXX: Handle assigning for structs and struct props
+	switch(token) {		
 		case '=':
 			expect('=');
 			if(struct_prop_def.value != NULL) {
@@ -745,8 +743,9 @@ value_t expr_tail(value_t left_val) {
 				for(int i = 0; i < struct_prop_def.type_size; i++) {
 					ptr[i] = (unsigned char)((expr_val >> (i * 8)) & 0xff);
 				}
-				
-				break;
+
+				found_ident = 0;
+				return *((value_t *) struct_prop_def.value);
 			}
 			
 			if(found_ident) {
@@ -866,14 +865,10 @@ void stmt() {
 					expect('{');
 					memcpy(ident, ident_copy, IDENT_MAX);
 					struct_def_t *new_struct = make_struct_def();
-					char *temp_src = src;
-					src = backtrack_src;
-					next();
 					int ident_size = strlen(ident);
 					new_struct->struct_name = safe_malloc(ident_size + 1);
 					memcpy(new_struct->struct_name, ident, ident_size);
 					new_struct->struct_name[ident_size] = 0;
-					src = temp_src;
 					while(token != '}' && token != STOP) {
 						int type_size = token != BPTR
 							? int_pow(2, token - B8)
