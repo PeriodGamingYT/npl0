@@ -1,6 +1,11 @@
+sub_test {
+	b32+ c
+}
+
 test {
 	b8+ a
 	b32+ b
+	sub_test c
 }
 
 test a
@@ -8,3 +13,5 @@ a.a = 2
 a.a
 a.b = 69420
 a.b
+a.c.c = 5
+a.c.c

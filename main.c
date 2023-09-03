@@ -5,7 +5,7 @@
 
 // tokens
 enum { 
-	NUM = 0, 
+	NUM, 
 	STOP, 
 	EQ, 
 	MORE_EQ, 
@@ -266,10 +266,11 @@ void *safe_malloc(unsigned int size) {
 }
 
 // structs
-typedef struct {
+typedef struct struct_def_s {
 	int size;
 	int *is_pos;
 	int *type_size;
+	struct struct_def_s **struct_defs;
 	char **name;
 	char *struct_name;
 } struct_def_t;
@@ -295,7 +296,7 @@ void print_struct_def(struct_def_t *struct_def) {
 // part of vars
 #define VALUE_MAX 8
 typedef unsigned char var_value_t[VALUE_MAX];
-typedef struct {
+typedef struct struct_val_s {
 	struct_def_t *struct_def;
 	var_value_t *vals;
 	char *name;
@@ -380,6 +381,7 @@ struct_def_t *make_struct_def() {
 		NULL,
 		NULL,
 		NULL,
+		NULL,
 		NULL
 	};
 	
@@ -413,17 +415,26 @@ typedef struct var_s {
 	struct_val_t *struct_val;
 } var_t;
 
-void add_struct_def(struct_def_t *struct_def, var_t var) {
+typedef struct {
+	char *name;
+	int type_size;
+	int is_pos;
+	struct_def_t *struct_def;
+} struct_prop_t;
+
+void add_struct_def(struct_def_t *struct_def, struct_prop_t prop) {
 	struct_def->size++;
 	struct_def->is_pos = safe_realloc(struct_def->is_pos, sizeof(int) * struct_def->size);
 	struct_def->type_size = safe_realloc(struct_def->type_size, sizeof(int) * struct_def->size);
-	struct_def->name = safe_realloc(struct_def->name, sizeof(char *) * struct_def->size);	
-	struct_def->is_pos[struct_def->size - 1] = var.is_pos;
-	struct_def->type_size[struct_def->size - 1] = var.type_size;
-	int name_size = strlen(var.name);
+	struct_def->name = safe_realloc(struct_def->name, sizeof(char *) * struct_def->size);
+	struct_def->struct_defs = safe_realloc(struct_def->struct_defs, sizeof(struct_def_t *) * struct_def->size);
+	struct_def->is_pos[struct_def->size - 1] = prop.is_pos;
+	struct_def->type_size[struct_def->size - 1] = prop.type_size;
+	int name_size = strlen(prop.name);
 	struct_def->name[struct_def->size - 1] = safe_malloc(name_size + 1);
-	memcpy(struct_def->name[struct_def->size - 1], var.name, name_size);
+	memcpy(struct_def->name[struct_def->size - 1], prop.name, name_size);
 	struct_def->name[struct_def->size - 1][name_size] = 0;
+	struct_def->struct_defs[struct_def->size - 1] = prop.struct_def;
 }
 
 // rest of vars
@@ -870,6 +881,20 @@ void stmt() {
 					memcpy(new_struct->struct_name, ident, ident_size);
 					new_struct->struct_name[ident_size] = 0;
 					while(token != '}' && token != STOP) {
+						if(token == IDENT) {
+							int struct_index = index_struct_def(ident);
+							next();
+							add_struct_def(new_struct, (struct_prop_t) {
+								ident,
+								0,
+								0,
+								struct_stack[struct_index]
+							});
+
+							next();
+							continue;
+						}
+						
 						int type_size = token != BPTR
 							? int_pow(2, token - B8)
 							: (int) sizeof(value_t);
@@ -882,11 +907,10 @@ void stmt() {
 
 						int is_pos = token == '+';
 						next();
-						add_struct_def(new_struct, (var_t) {
+						add_struct_def(new_struct, (struct_prop_t) {
 							ident,
 							type_size,
 							is_pos,
-							NULL,
 							NULL
 						});
 
