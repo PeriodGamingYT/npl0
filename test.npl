@@ -13,5 +13,8 @@ a.a = 2
 a.a
 a.b = 69420
 a.b
+a.a
+
+\ this line below gets skipped, i don't know why
 a.c.c = 5
 a.c.c

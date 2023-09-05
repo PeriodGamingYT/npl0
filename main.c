@@ -33,7 +33,7 @@ enum {
 
 // macros
 #define H(_x) \
-	fprintf(stderr, "hit%s\n", #_x);
+	fprintf(stderr, "%d hit%s\n", __LINE__, #_x);
 
 #define IS_IDENT_START(_x) \
 	((_x >= 'A' && _x <= 'Z') || (_x >= 'a' && _x <= 'z') || (_x == '_'))
@@ -76,6 +76,9 @@ enum {
 	NOT_NULL_FREE(_x); \
 	_x##_size = 0;
 
+#define EXPECT(_x) \
+	expect((_x), __LINE__)
+
 // globals
 typedef intptr_t value_t;
 int token = 0;
@@ -89,31 +92,14 @@ char *buffer_ptr = NULL;
 #define IDENT_MAX 32
 char ident[IDENT_MAX] = { 0 };
 int ident_index = 0;
-void next() {
-
-	// whitespace
-	if(IS_STOP(*src)) {
-		token = STOP;
-		return;
-	}
-
-	while(IS_WHITESPACE(*src)) {
-		src++;
-	}
-
-	if(IS_STOP(*src)) {
-		token = STOP;
-		return;
-	}
-
-	// comments
+void skip_comment() {
 	if(*src == '\\') {
 		src++;
-		while(IS_NEWLINE(*src) && !IS_STOP(*src)) {
+		while(!IS_NEWLINE(*src) && !IS_STOP(*src)) {
 			src++;
 		}
 
-		while(IS_WHITESPACE(*src)) {
+		while(IS_NEWLINE(*src)) {
 			src++;
 		}
 
@@ -122,6 +108,28 @@ void next() {
 			return;
 		}
 	}
+}
+
+void next() {
+
+	// whitespace
+	if(IS_STOP(*src)) {
+		token = STOP;
+		return;
+	}
+
+	skip_comment();
+	while(IS_WHITESPACE(*src)) {
+		skip_comment();
+		src++;
+	}
+
+	if(IS_STOP(*src)) {
+		token = STOP;
+		return;
+	}
+
+	skip_comment();
 
 	// integers (negatives handled by value())
 	if(IS_NUMBER(*src)) {
@@ -137,6 +145,7 @@ void next() {
 	}
 
 	// idents
+	skip_comment();
 	if(IS_IDENT_START(*src)) {
 		ident_index = 0;
 		memset(ident, 0, sizeof(char) * IDENT_MAX);
@@ -192,11 +201,12 @@ void next() {
 				return;
 			}
 		}
-		
+
 		return;
 	}
 	
 	// opers
+	skip_comment();
 	const int new_token[] = { 
 		EQ, 
 		MORE_EQ, 
@@ -220,11 +230,12 @@ void next() {
 	}
 
 	token = *(src++);
+	skip_comment();
 }
 
-int expect(char x) {
+int expect(char x, int line) {
 	if(token != x) {
-		fprintf(stderr, "expected %c:%d, but got %c:%d instead\n", x, x, token, token);
+		fprintf(stderr, "line %d expected %c:%d, but got a '%c':%d instead\n", line, x, x, token, token);
 		exit(1);
 	}
 
@@ -300,6 +311,7 @@ typedef struct struct_val_s {
 	struct_def_t *struct_def;
 	var_value_t *vals;
 	char *name;
+	struct struct_val_s **struct_vals;
 } struct_val_t;
 
 void print_struct_val(struct_val_t *struct_val) {
@@ -310,6 +322,10 @@ void print_struct_val(struct_val_t *struct_val) {
 	
 	fprintf(stderr, "struct_val\n");
 	print_struct_def(struct_val->struct_def);
+	if(struct_val->name != NULL) {
+		fprintf(stderr, "name %s\n\n", struct_val->name);
+	}
+	
 	if(struct_val->struct_def == NULL) {
 		fprintf(stderr, "struct_def in struct_val is null\n\n");
 	}
@@ -317,18 +333,25 @@ void print_struct_val(struct_val_t *struct_val) {
 	for(int i = 0; struct_val->struct_def != NULL && i < struct_val->struct_def->size; i++) {
 		fprintf(stderr, "vals %d: %ld\n", i, (value_t)(struct_val->vals[i]));
 	}
-
-	fprintf(stderr, "name %s\n\n", struct_val->name);
 }
 
 void free_struct_vals(struct_val_t **struct_val) {
 	NULL_RETURN_REF(struct_val);
 	NOT_NULL_FREE((*struct_val)->vals);
 	NOT_NULL_FREE((*struct_val)->name);
+	for(int i = 0; i < (*struct_val)->struct_def->size; i++) {
+		free_struct_vals(&((*struct_val)->struct_vals[i]));
+	}
+
+	NOT_NULL_FREE((*struct_val)->struct_vals);
 	NOT_NULL_FREE(*struct_val);
 }
 
 int struct_val_prop(struct_val_t *struct_val, char *name) {
+	if(struct_val == NULL || struct_val->struct_def == NULL) {
+		return -1;
+	}
+	
 	for(int i = 0; i < struct_val->struct_def->size; i++) {
 		if(!strcmp(struct_val->struct_def->name[i], name)) {
 			return i;
@@ -352,6 +375,16 @@ struct_val_t *make_struct_val(struct_def_t *struct_def, char *name) {
 	struct_val->name = safe_malloc(name_length);
 	memcpy(struct_val->name, name, name_length - 1);
 	struct_val->name[name_length - 1] = 0;
+	struct_val->struct_vals = safe_malloc(sizeof(struct_val_t *) * struct_def->size);
+	memset(struct_val->struct_vals, 0, sizeof(struct_val_t *) * struct_def->size);
+	for(int i = 0; i < struct_def->size; i++) {
+		if(struct_def->struct_defs[i] == NULL) {
+			continue;
+		}
+
+		struct_val->struct_vals[i] = make_struct_val(struct_def->struct_defs[i], struct_def->name[i]);
+	}
+	
 	return struct_val;
 }
 
@@ -606,22 +639,22 @@ value_t value() {
 
 	switch(token) {
 		case '(':
-			expect('(');
+			EXPECT('(');
 			eval_value = expr();
-			expect(')');
+			EXPECT(')');
 			break;
 
-		case '!': expect('!'); eval_value = !expr(); break;
-		case '~': expect('~'); eval_value = ~expr(); break;
-		case '-': expect('-'); eval_value = -expr(); break;
+		case '!': EXPECT('!'); eval_value = !expr(); break;
+		case '~': EXPECT('~'); eval_value = ~expr(); break;
+		case '-': EXPECT('-'); eval_value = -expr(); break;
 		case ':':
-			expect(':');
+			EXPECT(':');
 			eval_value = (value_t) vars[ident_var_index(1)].value;
-			expect(IDENT);
+			EXPECT(IDENT);
 			break;
 
 		case '@':
-			expect('@');
+			EXPECT('@');
 			if(token < B8 || token > BPTR) {
 				fprintf(stderr, "when using hashtag, provide a type and then a +/-\n");
 				exit(1);
@@ -661,53 +694,60 @@ value_t value() {
 
 			eval_value = val;
 			break;
-		
+
+		case '.':
+			if(current_struct_val == NULL) {
+				fprintf(stderr, "missing dot to a struct\n");
+				exit(1);
+			}
+
+			EXPECT('.');
+			int prop_index = struct_val_prop(current_struct_val, ident);
+			EXPECT(IDENT);
+			var_t prop_var = {
+				NULL,
+				current_struct_val->struct_def->type_size[prop_index],
+				current_struct_val->struct_def->is_pos[prop_index],
+				&((current_struct_val->vals[prop_index])),
+				NULL
+			};
+
+			eval_value = var_to_int(prop_var);
+			struct_prop_def = (var_def_t) {
+				prop_var.value,
+				prop_var.type_size,
+				prop_var.is_pos
+			};
+
+			current_struct_val = NULL;
+			found_ident = 0;
+			break;
+			
 		case IDENT:
 			if(current_struct_val != NULL) {
 				memcpy(ident_copy, ident, IDENT_MAX);
-				expect(IDENT);
-				int prop_index = struct_val_prop(current_struct_val, ident_copy);
+				EXPECT(IDENT);
+				int prop_index = struct_val_prop(current_struct_val, ident);
 				if(prop_index == -1) {
-					print_struct_val(current_struct_val);
-					fprintf(stderr, "tried to access nonexistant structure property\n");
+					fprintf(stderr, "tried to access nonexistent structure property %s\n", ident_copy);
 					exit(1);
 				}
-
-				if(token != '.') {
-					var_t var = {
-						NULL,
-						current_struct_val->struct_def->type_size[prop_index],
-						current_struct_val->struct_def->is_pos[prop_index],
-						&((current_struct_val->vals[prop_index])),
-						NULL
-					};
-
-					eval_value = var_to_int(var);
-					struct_prop_def = (var_def_t) {
-						var.value,
-						var.type_size,
-						var.is_pos
-					};
-
-					current_struct_val = NULL;
-					break;
-				}
-
-				current_struct_val = (struct_val_t *) current_struct_val->vals[prop_index];
-				value();
+				
+				current_struct_val = current_struct_val->struct_vals[prop_index];
+				eval_value = value();
 				break;
 			}
-						
+	
 			int index = ident_var_index(1);
 			var_t var = vars[index];
 			eval_value = var_to_int(var);
 			memcpy(ident_copy, ident, IDENT_MAX);
-			expect(IDENT);
+			EXPECT(IDENT);
 			found_ident = 1;
 			if(token == '.' && var.struct_val != NULL) {
 				current_struct_val = var.struct_val;
-				next();
 				eval_value = value();
+				current_struct_val = NULL;
 			} else if(token == '.') {
 				fprintf(stderr, "tried to access a variable as a struct when it is not\n");
 				exit(1);
@@ -716,8 +756,8 @@ value_t value() {
 			break;
 
 		case SIZEOF:
-			expect(SIZEOF);
-			expect('[');
+			EXPECT(SIZEOF);
+			EXPECT('[');
 			if(token < B8 || token > BPTR) {
 				fprintf(stderr, "sizeof needs a type\n");
 				exit(1);
@@ -731,12 +771,15 @@ value_t value() {
 
 			eval_value = type_size;
 			next();
-			expect(']');
+			EXPECT(']');
 			break;
 
 		default:
-			eval_value = token_val;
-			expect(NUM);
+			if(token == NUM) {
+				EXPECT(NUM);
+				eval_value = token_val;
+			}
+
 			break;
 	}
 
@@ -747,7 +790,7 @@ value_t expr_tail(value_t left_val) {
 	int index = -1;
 	switch(token) {		
 		case '=':
-			expect('=');
+			EXPECT('=');
 			if(struct_prop_def.value != NULL) {
 				unsigned char *ptr = (unsigned char *) struct_prop_def.value;
 				value_t expr_val = expr();
@@ -756,6 +799,7 @@ value_t expr_tail(value_t left_val) {
 				}
 
 				found_ident = 0;
+				current_struct_val = NULL;
 				return *((value_t *) struct_prop_def.value);
 			}
 			
@@ -786,11 +830,11 @@ value_t expr_tail(value_t left_val) {
 			
 			return expr_val;
 		
-		case '+': expect('+'); return expr_tail(left_val + value());
-		case '-': expect('-'); return expr_tail(left_val - value());
-		case '*': expect('*'); return expr_tail(left_val * value());
+		case '+': EXPECT('+'); return expr_tail(left_val + value());
+		case '-': EXPECT('-'); return expr_tail(left_val - value());
+		case '*': EXPECT('*'); return expr_tail(left_val * value());
 		case '/': 
-			expect('/'); 
+			EXPECT('/'); 
 			value_t right_val = value();
 			if(right_val == 0) {
 				fprintf(stderr, "can't divide %ld by 0\n", left_val);
@@ -800,18 +844,18 @@ value_t expr_tail(value_t left_val) {
 			return expr_tail(left_val / right_val);
 			break;
 		
-		case '%': expect('%'); return expr_tail(left_val % value());
-		case '<': expect('<'); return expr_tail(left_val < value());
-		case '>': expect('>'); return expr_tail(left_val > value());
-		case '&': expect('&'); return expr_tail(left_val & value());
-		case '|': expect('|'); return expr_tail(left_val | value());
-		case '^': expect('^'); return expr_tail(left_val ^ value());
-		case EQ: expect(EQ); return expr_tail(left_val == value());
-		case MORE_EQ: expect(MORE_EQ); return expr_tail(left_val >= value());
-		case LESS_EQ: expect(LESS_EQ); return expr_tail(left_val <= value());
-		case NOT_EQ: expect(NOT_EQ); return expr_tail(left_val != value());
-		case SHL: expect(SHL); return expr_tail(left_val << value());
-		case SHR: expect(SHR); return expr_tail(left_val >> value());
+		case '%': EXPECT('%'); return expr_tail(left_val % value());
+		case '<': EXPECT('<'); return expr_tail(left_val < value());
+		case '>': EXPECT('>'); return expr_tail(left_val > value());
+		case '&': EXPECT('&'); return expr_tail(left_val & value());
+		case '|': EXPECT('|'); return expr_tail(left_val | value());
+		case '^': EXPECT('^'); return expr_tail(left_val ^ value());
+		case EQ: EXPECT(EQ); return expr_tail(left_val == value());
+		case MORE_EQ: EXPECT(MORE_EQ); return expr_tail(left_val >= value());
+		case LESS_EQ: EXPECT(LESS_EQ); return expr_tail(left_val <= value());
+		case NOT_EQ: EXPECT(NOT_EQ); return expr_tail(left_val != value());
+		case SHL: EXPECT(SHL); return expr_tail(left_val << value());
+		case SHR: EXPECT(SHR); return expr_tail(left_val >> value());
 	}
 
 	return left_val;
@@ -873,7 +917,7 @@ void stmt() {
 				char *backtrack_src = src;
 				next();
 				if(token == '{') {
-					expect('{');
+					EXPECT('{');
 					memcpy(ident, ident_copy, IDENT_MAX);
 					struct_def_t *new_struct = make_struct_def();
 					int ident_size = strlen(ident);
@@ -981,14 +1025,14 @@ void stmt() {
 			next();
 
 			// XXX: functions use '[', not accounted for
-			expect('=');
+			EXPECT('=');
 			value_t temp_expr = expr();
 			assign_int_var(&(vars[vars_size - 1]), temp_expr);
 			fprintf(stderr, "decl %ld\n", temp_expr);
 			break;
 
 		case IF:
-			expect(IF);
+			EXPECT(IF);
 			int result = expr();
 			flow_t flow = {
 				FLOW_IF,
@@ -1006,7 +1050,7 @@ void stmt() {
 			break;
 
 		case ELSE:
-			expect(ELSE);
+			EXPECT(ELSE);
 			if(flow_stack_size <= 0) {
 				fprintf(stderr, "else without an if\n");
 				exit(1);
@@ -1014,7 +1058,7 @@ void stmt() {
 			
 			if(flow_stack[flow_stack_size - 1].eval) {
 				if(token == IF) {
-					expect(IF);
+					EXPECT(IF);
 					expr();
 				}
 				
@@ -1023,7 +1067,7 @@ void stmt() {
 			}
 
 			if(token == IF) {
-				expect(IF);
+				EXPECT(IF);
 				int result = expr();
 				flow_t flow = {
 					FLOW_IF,
@@ -1058,7 +1102,7 @@ void stmt() {
 				ARRAY_PUSH(flow_stack, flow_t, loop_flow);
 			}
 
-			expect(LOOP);
+			EXPECT(LOOP);
 			int loop_expr = expr();
 			flow_stack[flow_stack_size - 1].eval = loop_expr;
 			if(!loop_expr) {
@@ -1069,13 +1113,13 @@ void stmt() {
 		
 		case '{':
 			fprintf(stderr, "block enter %d -> %d\n", var_scopes_size, var_scopes_size + 1);
-			expect('{');
+			EXPECT('{');
 			var_scope_add();
 			break;
 
 		case '}':
 			fprintf(stderr, "block remove %d -> %d\n", var_scopes_size, var_scopes_size - 1);
-			expect('}');
+			EXPECT('}');
 			var_scope_remove();
 			if(flow_stack_size <= 0) {
 				fprintf(stderr, "extra closing parens\n");
