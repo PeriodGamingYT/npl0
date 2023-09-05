@@ -2,7 +2,7 @@ make: main.c
 	gcc -s -o main main.c
 
 gdb:
-	gcc -g -o main main.c
+	gcc -g -O0 -o main main.c
 	clear
 	gdb ./main
 

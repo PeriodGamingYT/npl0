@@ -15,6 +15,6 @@ a.b = 69420
 a.b
 a.a
 
-\ this line below gets skipped, i don't know why
+\ this line below doesn't get assigned, though, it doesn't error out
 a.c.c = 5
 a.c.c

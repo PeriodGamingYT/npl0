@@ -35,6 +35,11 @@ enum {
 #define H(_x) \
 	fprintf(stderr, "%d hit%s\n", __LINE__, #_x);
 
+#define HARGS(...) \
+	fprintf(stderr, "%d hit args ", __LINE__); \
+	fprintf(stderr, __VA_ARGS__); \
+	fprintf(stderr, "\n");
+
 #define IS_IDENT_START(_x) \
 	((_x >= 'A' && _x <= 'Z') || (_x >= 'a' && _x <= 'z') || (_x == '_'))
 
@@ -233,7 +238,7 @@ void next() {
 	skip_comment();
 }
 
-int expect(char x, int line) {
+void expect(char x, int line) {
 	if(token != x) {
 		fprintf(stderr, "line %d expected %c:%d, but got a '%c':%d instead\n", line, x, x, token, token);
 		exit(1);
@@ -712,6 +717,13 @@ value_t value() {
 				NULL
 			};
 
+			struct_def_t *struct_def = current_struct_val->struct_def->struct_defs[prop_index];
+			if(struct_def != NULL && token == '.') {
+				eval_value = value();
+HARGS("%ld\n",eval_value);
+				break;
+			}
+			
 			eval_value = var_to_int(prop_var);
 			struct_prop_def = (var_def_t) {
 				prop_var.value,
