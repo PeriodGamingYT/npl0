@@ -84,19 +84,17 @@ enum {
 #define EXPECT(_x) \
 	expect((_x), __LINE__)
 
-// globals
+// lexing
+// 32 (actually 31 because of null term) is plenty, if you need more than that, you're screwed anyway
+#define IDENT_MAX 32
+char ident[IDENT_MAX] = { 0 };
+int ident_index = 0;
 typedef intptr_t value_t;
 int token = 0;
 value_t token_val = 0;
 char *src = NULL;
 char *start_src = NULL;
 char *buffer_ptr = NULL;
-
-// lexing
-// 32 (actually 31 because of null term) is plenty, if you need more than that, you're screwed anyway
-#define IDENT_MAX 32
-char ident[IDENT_MAX] = { 0 };
-int ident_index = 0;
 void skip_comment() {
 	if(*src == '\\') {
 		src++;
@@ -393,10 +391,19 @@ struct_val_t *make_struct_val(struct_def_t *struct_def, char *name) {
 	return struct_val;
 }
 
+// XXX: struct val doesn't free structs yet, working on it
 void free_struct_val(struct_val_t **struct_val) {
 	NULL_RETURN_REF(struct_val);
+	for(int i = 0; (*struct_val)->struct_def != NULL && i < (*struct_val)->struct_def->size; i++) {
+		if((*struct_val)->struct_def->struct_defs[i] != NULL) {
+			free_struct_val((struct_val_t **) &((*struct_val)->vals[i]));
+		}
+	}
+	
 	NOT_NULL_FREE((*struct_val)->vals);
+HARGS("name %s\n", (*struct_val)->name);
 	NOT_NULL_FREE((*struct_val)->name);
+HARGS("after free ptr %p\n",(*struct_val)->name);
 	NOT_NULL_FREE(*struct_val);
 }
 
@@ -1153,6 +1160,7 @@ void stmt() {
 
 // main
 void free_vars() {
+
 	// not freeing stuff but this is the exit function so that's why it's here
 	int line = 1;
 	char *temp_src = start_src;
