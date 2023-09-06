@@ -719,8 +719,8 @@ value_t value() {
 
 			struct_def_t *struct_def = current_struct_val->struct_def->struct_defs[prop_index];
 			if(struct_def != NULL && token == '.') {
+				current_struct_val = current_struct_val->struct_vals[prop_index];
 				eval_value = value();
-HARGS("%ld\n",eval_value);
 				break;
 			}
 			
