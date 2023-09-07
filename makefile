@@ -12,7 +12,7 @@ val:
 	gcc -g -o main main.c
 	cat test.npl | xclip -sel clip
 	clear
-	valgrind  --trace-children=yes --track-fds=yes --track-origins=yes --leak-check=full --show-leak-kinds=all ./main
+	cat test.npl | valgrind  --trace-children=yes --track-fds=yes --track-origins=yes --leak-check=full --show-leak-kinds=all ./main
 
 clean:
 	rm -f main
@@ -28,3 +28,7 @@ repl:
 	make
 	clear
 	./main
+
+lint:
+	clear
+	cppcheck --enable=all main.c

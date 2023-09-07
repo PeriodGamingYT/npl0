@@ -1,3 +1,4 @@
 Things to do:
+	Implementing pointers to structs and struct properties (refs)
 	Implementing memory allocation (heap, stack, nofree, heap) for variables
 	Functions

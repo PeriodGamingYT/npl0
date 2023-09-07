@@ -1,0 +1,12 @@
+a {
+	b32+ x
+	b8+ y
+}
+
+b {
+	a c
+	a d
+}
+
+a spam
+b eggs
