@@ -84,7 +84,8 @@ enum {
 #define EXPECT(_x) \
 	expect((_x), __LINE__)
 
-// DEF: PRINT_VALUE_BYTES
+#define PRINT_VALUE_BYTES(_x) \
+	print_value_bytes(#_x, _x)
 
 // lexing
 // 32 (actually 31 because of null term) is plenty, if you need more than that, you're screwed anyway
@@ -312,18 +313,26 @@ void free_struct_val(struct_val_t **struct_val) {
 	NOT_NULL_FREE(*struct_val);
 }
 
-int struct_val_prop(struct_val_t *struct_val, char *name) {
-	if(struct_val == NULL || struct_val->struct_def == NULL) {
+int struct_def_prop(struct_def_t *struct_def, char *name) {
+	if(struct_def == NULL) {
 		return -1;
 	}
-	
-	for(int i = 0; i < struct_val->struct_def->size; i++) {
-		if(!strcmp(struct_val->struct_def->name[i], name)) {
+
+	for(int i = 0; i < struct_def->size; i++) {
+		if(!strcmp(struct_def->name[i], name)) {
 			return i;
 		}
 	}
 
 	return -1;
+}
+
+int struct_val_prop(struct_val_t *struct_val, char *name) {
+	if(struct_val == NULL) {
+		return -1;
+	}
+
+	return struct_def_prop(struct_val->struct_def, name);
 }
 
 struct_val_t *make_struct_val(struct_def_t *struct_def, char *name) {
@@ -355,7 +364,7 @@ struct_val_t *make_struct_val(struct_def_t *struct_def, char *name) {
 
 struct_def_t **struct_stack = NULL;
 int struct_stack_size = 0;
-int index_struct_def(char *name) {
+int struct_def_index(char *name) {
 	for(int i = 0; i < struct_stack_size; i++) {
 		if(!strcmp(struct_stack[i]->struct_name, name)) {
 			return i;
@@ -590,8 +599,38 @@ value_t value() {
 		case '-': EXPECT('-'); eval_value = -expr(); break;
 		case ':':
 			EXPECT(':');
-			eval_value = (value_t) vars[ident_var_index(1)].value;
+			int var_index = ident_var_index(1);
+			eval_value = vars[var_index].struct_val == NULL
+				? (value_t) vars[var_index].value
+				: (value_t) vars[var_index].struct_val->vals;
+
 			EXPECT(IDENT);
+			break;
+
+		case '#':
+			EXPECT('#');
+			EXPECT('(');
+			value_t hash_base = expr();
+			EXPECT(')');
+			int hash_struct_index = struct_def_index(ident);
+			if(hash_struct_index == -1) {
+				fprintf(stderr, "couldn't find structure %s\n", ident);
+				exit(1);
+			}
+			
+			EXPECT(IDENT);
+			EXPECT('>');
+			struct_def_t *hash_struct_def = struct_stack[hash_struct_index];
+			int hash_prop_index = struct_def_prop(hash_struct_def, ident);
+			if(hash_prop_index == -1) {
+				fprintf(stderr, "couldn't find structure property %s\n", ident);
+				exit(1);
+			}
+
+			EXPECT(IDENT);
+			found_ident = 0;
+			struct_prop_def = (var_def_t) { NULL, 0, 0 };
+			eval_value = (value_t) &(((value_t *) hash_base)[hash_prop_index]);
 			break;
 
 		case '@':
@@ -644,6 +683,11 @@ value_t value() {
 
 			EXPECT('.');
 			int prop_index = struct_val_prop(current_struct_val, ident);
+			if(prop_index == -1) {
+				fprintf(stderr, "couldn't find struct %s\n", ident);
+				exit(1);
+			}
+			
 			EXPECT(IDENT);
 			var_t prop_var = {
 				NULL,
@@ -677,7 +721,7 @@ value_t value() {
 				EXPECT(IDENT);
 				int sub_prop_index = struct_val_prop(current_struct_val, ident);
 				if(sub_prop_index == -1) {
-					fprintf(stderr, "tried to access nonexistent structure property %s\n", ident_copy);
+					fprintf(stderr, "couldn't find structure property %s\n", ident_copy);
 					exit(1);
 				}
 				
@@ -856,6 +900,7 @@ void stmt() {
 		case '-':
 		case '~':
 		case '!':
+		case '#':
 		case SIZEOF:
 		case IDENT:
 
@@ -877,10 +922,10 @@ void stmt() {
 					memcpy(ident, first_prop_name, IDENT_MAX);
 					while(token != '}' && token != STOP) {
 						if(token == IDENT) {
-							int struct_index = index_struct_def(ident);
+							int struct_index = struct_def_index(ident);
 							if(struct_index == -1) {
 								free_struct_def(&new_struct);
-								fprintf(stderr, "tried to add nonexistent struct type: %s\n", ident);
+								fprintf(stderr, "couldn't find struct %s\n", ident);
 								exit(1);
 							}
 							
@@ -926,7 +971,7 @@ void stmt() {
 				token = IDENT;
 				src = backtrack_src;
 				next();
-				int struct_index = index_struct_def(ident_copy);
+				int struct_index = struct_def_index(ident_copy);
 				if(struct_index != -1) {
 					struct_val_t *struct_val = make_struct_val(struct_stack[struct_index], ident);
 					ident_var_add();

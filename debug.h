@@ -38,9 +38,6 @@ void print_struct_def(struct_def_t *struct_def) {
 	fprintf(stderr, "\n");
 }
 
-#define PRINT_VALUE_BYTES(_x) \
-	print_value_bytes(#_x, _x)
-
 void print_value_bytes(const char *message, value_t value) {
 	fprintf(stderr, "value %s\n", message);
 	unsigned char *value_ptr = (unsigned char *) &value;
