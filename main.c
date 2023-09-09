@@ -26,9 +26,9 @@ enum {
 	STACK,
 	HEAP,
 	NOFREE,
-	RODATA,
 	SIZEOF,
-	ELSE
+	ELSE,
+	FREE
 };
 
 // macros
@@ -117,6 +117,10 @@ void skip_comment() {
 			return;
 		}
 	}
+
+	if(*src == '\\') {
+		skip_comment();
+	}
 }
 
 void next() {
@@ -183,7 +187,8 @@ void next() {
 			HEAP, 
 			NOFREE,
 			SIZEOF,
-			ELSE
+			ELSE,
+			FREE
 		};
 
 		const char *reserved[] = {
@@ -200,7 +205,8 @@ void next() {
 			"heap",
 			"nofree",
 			"sizeof",
-			"else"
+			"else",
+			"free"
 		};
 
 		for(int i = 0; i < ARRAY_SIZE(reserved); i++) {
@@ -284,6 +290,7 @@ typedef struct struct_def_s {
 	struct struct_def_s **struct_defs;
 	char **name;
 	char *struct_name;
+	int *mem_type;
 } struct_def_t;
 
 // DEF: print_struct_def
@@ -293,12 +300,19 @@ typedef struct struct_def_s {
 typedef unsigned char var_value_t[VALUE_MAX];
 typedef struct struct_val_s {
 	struct_def_t *struct_def;
-	var_value_t *vals;
+	var_value_t **vals;
 	char *name;
 	struct struct_val_s **struct_vals;
 } struct_val_t;
 
 // DEF: print_value_bytes
+
+enum {
+	MEM_NONE,
+	MEM_STACK,
+	MEM_HEAP,
+	MEM_NOFREE
+};
 
 void free_struct_val(struct_val_t **struct_val) {
 	NULL_RETURN_REF(struct_val);
@@ -307,6 +321,27 @@ void free_struct_val(struct_val_t **struct_val) {
 		free_struct_val(&sub_struct_val);
 	}
 
+	for(int i = 0; i < (*struct_val)->struct_def->size; i++) {
+		int current_type = (*struct_val)->struct_def->mem_type[i];
+		if(
+			current_type == MEM_NONE ||
+			current_type == MEM_NOFREE ||
+			(*struct_val)->vals[i] == NULL
+		) {
+			continue;
+		}
+
+		free(*((value_t **) *((*struct_val)->vals[i])));
+	}
+
+	for(int i = 0; i < (*struct_val)->struct_def->size; i++) {
+		if((*struct_val)->vals[i] == NULL) {
+			continue;
+		}
+
+		free(*((*struct_val)->vals[i]));
+	}
+	
 	NOT_NULL_FREE((*struct_val)->vals);
 	NOT_NULL_FREE((*struct_val)->struct_vals);
 	NOT_NULL_FREE((*struct_val)->name);
@@ -343,8 +378,12 @@ struct_val_t *make_struct_val(struct_def_t *struct_def, char *name) {
 	
 	struct_val_t *struct_val = safe_malloc(sizeof(struct_val_t));
 	struct_val->struct_def = struct_def;
-	struct_val->vals = safe_malloc(sizeof(var_value_t) * struct_def->size);
-	memset(struct_val->vals, 0, sizeof(var_value_t) * struct_def->size);
+	struct_val->vals = safe_malloc(sizeof(var_value_t *) * struct_def->size);
+	for(int i = 0; i < struct_def->size; i++) {
+		struct_val->vals[i] = safe_malloc(sizeof(var_value_t));
+		memset(struct_val->vals[i], 0, sizeof(var_value_t));
+	}
+	
 	int name_length = strlen(name) + 1;
 	struct_val->name = safe_malloc(name_length);
 	memcpy(struct_val->name, name, name_length - 1);
@@ -382,6 +421,7 @@ struct_def_t *make_struct_def() {
 		NULL,
 		NULL,
 		NULL,
+		NULL,
 		NULL
 	};
 	
@@ -394,6 +434,7 @@ void free_struct_def(struct_def_t **struct_def) {
 	NOT_NULL_FREE((*struct_def)->type_size);
 	NOT_NULL_FREE((*struct_def)->struct_defs);
 	NOT_NULL_FREE((*struct_def)->struct_name);
+	NOT_NULL_FREE((*struct_def)->mem_type);
 	if((*struct_def)->name != NULL) {
 		for(int i = 0; i < (*struct_def)->size; i++) {
 			NOT_NULL_FREE((*struct_def)->name[i]);
@@ -414,6 +455,7 @@ typedef struct var_s {
 	int is_pos;
 	var_value_t *value;
 	struct_val_t *struct_val;
+	int mem_type;
 } var_t;
 
 typedef struct {
@@ -421,6 +463,7 @@ typedef struct {
 	int type_size;
 	int is_pos;
 	struct_def_t *struct_def;
+	int mem_type;
 } struct_prop_t;
 
 void add_struct_def(struct_def_t *struct_def, struct_prop_t prop) {
@@ -429,6 +472,7 @@ void add_struct_def(struct_def_t *struct_def, struct_prop_t prop) {
 	struct_def->type_size = safe_realloc(struct_def->type_size, sizeof(int) * struct_def->size);
 	struct_def->name = safe_realloc(struct_def->name, sizeof(char *) * struct_def->size);
 	struct_def->struct_defs = safe_realloc(struct_def->struct_defs, sizeof(struct_def_t *) * struct_def->size);
+	struct_def->mem_type = safe_realloc(struct_def->mem_type, sizeof(int) * struct_def->size);
 	struct_def->is_pos[struct_def->size - 1] = prop.is_pos;
 	struct_def->type_size[struct_def->size - 1] = prop.type_size;
 	int name_size = strlen(prop.name);
@@ -436,15 +480,18 @@ void add_struct_def(struct_def_t *struct_def, struct_prop_t prop) {
 	memcpy(struct_def->name[struct_def->size - 1], prop.name, name_size);
 	struct_def->name[struct_def->size - 1][name_size] = 0;
 	struct_def->struct_defs[struct_def->size - 1] = prop.struct_def;
+	struct_def->mem_type[struct_def->size - 1] = prop.mem_type;
 }
 
 // rest of vars
-var_value_t *var_values = NULL;
+var_value_t **var_values = NULL;
 int var_values_size = 0;
 var_value_t *var_values_add() {
-	ARRAY_PUSH_UNDEF(var_values, var_value_t);
-	memset(var_values[var_values_size - 1], 0, sizeof(var_value_t));
-	return &(var_values[var_values_size - 1]);
+	ARRAY_PUSH_UNDEF(var_values, var_value_t *);
+	var_value_t *value = malloc(sizeof(var_value_t));
+	memset(value, 0, sizeof(var_value_t));
+	var_values[var_values_size - 1] = value;
+	return var_values[var_values_size - 1];
 }
 
 value_t var_to_int(var_t var) {
@@ -541,6 +588,14 @@ void var_scope_remove() {
 	for(int i = size - 1; i >= size - scope_size && i >= 0; i--) {
 		if(vars[i].name == NULL) {
 			continue;
+		}
+
+		if(
+			vars[i].struct_val == NULL && 
+			vars[i].mem_type != MEM_NONE &&
+			vars[i].mem_type != MEM_NOFREE
+		) {
+			free((void *) *(vars[i].value));
 		}
 		
 		free(vars[i].name);
@@ -693,8 +748,9 @@ value_t value() {
 				NULL,
 				current_struct_val->struct_def->type_size[prop_index],
 				current_struct_val->struct_def->is_pos[prop_index],
-				&((current_struct_val->vals[prop_index])),
-				NULL
+				current_struct_val->vals[prop_index],
+				NULL,
+				MEM_NONE
 			};
 
 			struct_def_t *struct_def = current_struct_val->struct_def->struct_defs[prop_index];
@@ -766,6 +822,16 @@ value_t value() {
 			EXPECT(']');
 			break;
 
+		// stack will be differnt and actually function as a stack in npl0
+		case STACK:
+		case HEAP:
+			next();
+			EXPECT('[');
+			value_t mem_size = expr();
+			EXPECT(']');
+			eval_value = (value_t) malloc(mem_size);
+			break;			
+
 		default:
 			if(token == NUM) {
 				EXPECT(NUM);
@@ -794,7 +860,7 @@ value_t expr_tail(value_t left_val) {
 				return *((value_t *) struct_prop_def.value);
 			}
 			
-			if(found_ident) {
+			if(found_ident && (token < B8 || token > BPTR)) {
 				int index = -1;
 				found_ident = 0;
 				memcpy(ident, ident_copy, IDENT_MAX);
@@ -889,11 +955,18 @@ flow_t *flow_stack = NULL;
 int flow_stack_size = 0;
 void stmt() {
 	int inital = token;
+
+	// skip comments
+	if(*src == '\\' || token == '\\') {
+		next();
+		return;
+	}
+	
 	switch(inital) {
 		case STOP:
 			return;
 
-		// if one of these opers are found here it has to be unary
+		// if one of these opers are found here it has to be unary		
 		case '(':
 		case ':': 
 		case '@':
@@ -934,11 +1007,34 @@ void stmt() {
 								ident,
 								0,
 								0,
-								struct_stack[struct_index]
+								struct_stack[struct_index],
+								MEM_NONE
 							});
 
 							next();
 							continue;
+						}
+
+						int mem_type = MEM_NONE;
+						if(
+							token == STACK ||
+							token == HEAP ||
+							token == NOFREE
+						) {
+							const int mem_type_lut[] = {
+								MEM_STACK, STACK,
+								MEM_HEAP, HEAP,
+								MEM_NOFREE, NOFREE
+							};
+							
+							for(int i = 0; i < ARRAY_SIZE(mem_type_lut); i += 2) {
+								if(token == mem_type_lut[i + 1]) {
+									mem_type = mem_type_lut[i];
+									break;
+								}
+							}
+
+							next();
 						}
 						
 						int type_size = token != BPTR
@@ -957,7 +1053,8 @@ void stmt() {
 							ident,
 							type_size,
 							is_pos,
-							NULL
+							NULL,
+							mem_type
 						});
 
 						next();
@@ -1010,6 +1107,28 @@ void stmt() {
 
 			int is_pos = token == '+';
 			next();
+			int mem_type = MEM_NONE;
+			if(
+				token == STACK ||
+				token == HEAP ||
+				token == NOFREE
+			) {
+				const int mem_type_lut[] = {
+					MEM_STACK, STACK,
+					MEM_HEAP, HEAP,
+					MEM_NOFREE, NOFREE
+				};
+				
+				for(int i = 0; i < ARRAY_SIZE(mem_type_lut); i += 2) {
+					if(token == mem_type_lut[i + 1]) {
+						mem_type = mem_type_lut[i];
+						break;
+					}
+				}
+
+				next();
+			}
+
 			if(token != IDENT) {
 				fprintf(stderr, "couldn't find name for variable name\n");
 				exit(1);
@@ -1024,6 +1143,7 @@ void stmt() {
 			vars[vars_size - 1].is_pos = is_pos;
 			vars[vars_size - 1].value = NULL;
 			vars[vars_size - 1].struct_val = NULL;
+			vars[vars_size - 1].mem_type = mem_type;
 			next();
 
 			// XXX: functions use '[', not accounted for
@@ -1112,6 +1232,16 @@ void stmt() {
 			}
 
 			break;
+
+		case FREE:
+			EXPECT(FREE);
+			EXPECT('[');
+			int free_index = ident_var_index(1);
+			free((void *) var_to_int(vars[free_index]));
+			assign_int_var(&(vars[free_index]), 0);
+			EXPECT(IDENT);
+			EXPECT(']');
+			break;
 		
 		case '{':
 			fprintf(stderr, "block enter %d -> %d\n", var_scopes_size, var_scopes_size + 1);
@@ -1152,10 +1282,17 @@ void free_vars() {
 	}
 	
 	fprintf(stderr, "this exit happened on line %d\n", line);
-	NOT_NULL_FREE_SIZE(var_values);
-	NOT_NULL_FREE_SIZE(var_scopes);
-	NOT_NULL_FREE_SIZE(flow_stack);
-	for(int i = 0; i < vars_size && vars != NULL; i++) {
+	for(int i = 0; i < vars_size && vars != NULL; i++) {	
+		if(
+			vars[i].struct_val == NULL && 
+			vars[i].mem_type != MEM_NONE &&
+			vars[i].mem_type != MEM_NOFREE &&
+			vars[i].value != NULL &&
+			var_to_int(vars[i]) != 0
+		) {
+			free((void *) var_to_int(vars[i]));
+		}
+
 		if(vars[i].name != NULL) {
 			free(vars[i].name);
 		}
@@ -1164,6 +1301,18 @@ void free_vars() {
 		free_struct_val(&(vars[i].struct_val));
 	}
 
+	for(int i = 0; i < var_values_size; i++) {
+		if(var_values[i] == NULL) {
+			continue;
+		}
+
+		free(var_values[i]);
+		var_values[i] = NULL;
+	}
+
+	NOT_NULL_FREE_SIZE(var_values);
+	NOT_NULL_FREE_SIZE(var_scopes);
+	NOT_NULL_FREE_SIZE(flow_stack);
 	NOT_NULL_FREE_SIZE(vars);
 	free(start_src);
 	src = NULL;
@@ -1201,7 +1350,7 @@ int main() {
 	start_src = src;
 	fprintf(stderr, "\ndebug log:\n");	
 	if(src == NULL || IS_STOP(*src)) {
-		fprintf(stderr, "this is an empty program\n");
+		fprintf(stderr, "this is an empty program, which is fine\n");
 		exit(0);
 	}
 	
