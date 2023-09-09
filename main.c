@@ -1200,6 +1200,11 @@ int main() {
 
 	start_src = src;
 	fprintf(stderr, "\ndebug log:\n");	
+	if(src == NULL || IS_STOP(*src)) {
+		fprintf(stderr, "this is an empty program\n");
+		exit(0);
+	}
+	
 	next();
 	while(token != STOP && *src && *src != -1) {
 		stmt();
