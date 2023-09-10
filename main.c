@@ -28,7 +28,10 @@ enum {
 	NOFREE,
 	SIZEOF,
 	ELSE,
-	FREE
+	FREE,
+	RET,
+	CONT,
+	BREAK
 };
 
 // macros
@@ -188,7 +191,10 @@ void next() {
 			NOFREE,
 			SIZEOF,
 			ELSE,
-			FREE
+			FREE,
+			RET,
+			CONT,
+			BREAK
 		};
 
 		const char *reserved[] = {
@@ -206,7 +212,10 @@ void next() {
 			"nofree",
 			"sizeof",
 			"else",
-			"free"
+			"free",
+			"ret",
+			"cont",
+			"break"
 		};
 
 		for(int i = 0; i < ARRAY_SIZE(reserved); i++) {
@@ -614,7 +623,7 @@ typedef struct {
 	int is_pos;
 } var_def_t;
 
-// expr parsing
+// part of expr parsing
 int int_pow(int base, int exp) {
 	if(exp == 0) {
 		return 1;
@@ -630,6 +639,79 @@ int int_pow(int base, int exp) {
 	return base;
 }
 
+// functions
+typedef struct {
+	int func_size;
+	int func_pos;
+	char *func_name;
+	int *arg_size;
+	int *arg_pos;
+	char **arg_name;
+	int args_size;
+	char *src_start;
+} func_def_t;
+
+void add_func_arg(func_def_t *func_def, int size, int is_pos, char *name) {
+	func_def->args_size++;
+	func_def->arg_size = safe_realloc(func_def->arg_size, sizeof(int) * func_def->args_size);
+	func_def->arg_pos = safe_realloc(func_def->arg_pos, sizeof(int) * func_def->args_size);
+	func_def->arg_name = safe_realloc(func_def->arg_name, sizeof(char *) * func_def->args_size);
+	func_def->arg_size[func_def->args_size - 1] = size;
+	func_def->arg_pos[func_def->args_size - 1] = is_pos;
+	int name_size = strlen(name) + 1;
+	char *arg_name = malloc(name_size);
+	memcpy(arg_name, name, name_size - 1);
+	arg_name[name_size - 1] = 0;
+	func_def->arg_name[func_def->args_size - 1] = arg_name;
+}
+
+func_def_t *make_func_def(char *name, int size, int is_pos) {
+	func_def_t *func_def = malloc(sizeof(func_def_t));
+	int name_size = strlen(name) + 1;
+	func_def->func_name = malloc(name_size);
+	memcpy(func_def->func_name, name, name_size - 1);
+	func_def->func_name[name_size - 1] = 0;
+	func_def->func_size = size;
+	func_def->func_pos = is_pos;
+	func_def->arg_size = NULL;
+	func_def->arg_pos = NULL;
+	func_def->arg_name = NULL;
+	func_def->args_size = 0;
+	func_def->src_start = NULL;
+	return func_def;
+}
+
+void free_func_def(func_def_t **func_def) {
+	NULL_RETURN_REF(func_def);
+	for(int i = 0; i < (*func_def)->args_size; i++) {
+		if((*func_def)->arg_name[i] == NULL) {
+			continue;
+		}
+
+		free((*func_def)->arg_name[i]);
+		(*func_def)->arg_name[i] = NULL;
+	}
+
+	NOT_NULL_FREE((*func_def)->arg_name);
+	NOT_NULL_FREE((*func_def)->func_name);
+	NOT_NULL_FREE((*func_def)->arg_size);
+	NOT_NULL_FREE((*func_def)->arg_pos);
+	NOT_NULL_FREE(*func_def);
+}
+
+typedef struct {
+	func_def_t *func_def;
+	var_value_t **arg_vals;
+	char *backtrack_src;
+	var_value_t value;
+} func_call_t;
+
+func_def_t **func_stack = NULL;
+int func_stack_size = 0;
+func_call_t **call_stack = NULL;
+int call_stack_size = 0;
+
+// expr parsing
 char ident_copy[IDENT_MAX] = { 0 };
 value_t expr();
 int found_ident = 0;
@@ -1133,21 +1215,87 @@ void stmt() {
 				fprintf(stderr, "couldn't find name for variable name\n");
 				exit(1);
 			}
-			
-			ident_var_add();
-			vars[vars_size - 1].type_size = int_pow(2, inital - B8);
+
+			char temp_ident[IDENT_MAX] = { 0 };
+			memcpy(temp_ident, ident, IDENT_MAX);
+			int var_size = int_pow(2, inital - B8);
 			if(inital == BPTR) {
-				vars[vars_size - 1].type_size = sizeof(void *);	
+				var_size = sizeof(void *);	
 			}
 			
+			next();
+			if(token == '[') {
+				next();
+				func_def_t *func_def = make_func_def(temp_ident, var_size, is_pos);
+				while(token != ']' && token != STOP) {
+					if(token < B8 || token > BPTR) {
+						free_func_def(&func_def);
+						fprintf(stderr, "function args doesn't have a type\n");
+						exit(1);
+					}
+					
+					int cur_size = int_pow(2, token - B8);
+					if(token == BPTR) {
+						cur_size = sizeof(void *);
+					}
+
+					next();
+					if(token != '+' && token != '-') {
+						free_func_def(&func_def);
+						fprintf(stderr, "function args doesn't have a +/- after a type\n");
+						exit(1);
+					}
+
+					int cur_pos = token == '+';
+					next();
+					if(token != IDENT) {
+						free_func_def(&func_def);
+						fprintf(stderr, "function args didn't have a identifier\n");
+						exit(1);
+					}
+					
+					add_func_arg(func_def, cur_size, cur_pos, ident);
+					next();
+					if(token != ']' && token != ',') {
+						free_func_def(&func_def);
+						fprintf(stderr, "function args aren't seperated by a comma\n");
+						exit(1);
+					}
+
+					if(token == ',') {
+						next();
+					}
+				}
+
+				if(token != ']') {
+					free_func_def(&func_def);
+					fprintf(stderr, "incomplete function arguments\n");
+					exit(1);
+				}
+
+				func_def->src_start = src;
+				ARRAY_PUSH(func_stack, func_def_t *, func_def);
+				skip_block();
+				next();
+				EXPECT('}');
+				break;
+			}
+
+			EXPECT('=');
+			if(var_size <= 0) {
+				fprintf(stderr, "a variable can't use b0, only functions can\n");
+				exit(1);
+			}
+			
+			memcpy(ident_copy, ident, IDENT_MAX);
+			memcpy(ident, temp_ident, IDENT_MAX);
+			ident_var_add();
+			memcpy(ident, ident_copy, IDENT_MAX);
+			vars[vars_size - 1].type_size = var_size;
 			vars[vars_size - 1].is_pos = is_pos;
 			vars[vars_size - 1].value = NULL;
 			vars[vars_size - 1].struct_val = NULL;
 			vars[vars_size - 1].mem_type = mem_type;
-			next();
-
-			// XXX: functions use '[', not accounted for
-			EXPECT('=');
 			value_t temp_expr = expr();
 			assign_int_var(&(vars[vars_size - 1]), temp_expr);
 			fprintf(stderr, "decl %ld\n", temp_expr);
@@ -1253,14 +1401,16 @@ void stmt() {
 			fprintf(stderr, "block remove %d -> %d\n", var_scopes_size, var_scopes_size - 1);
 			EXPECT('}');
 			var_scope_remove();
-			if(flow_stack_size <= 0) {
+			if(var_scopes_size <= 0) {
 				fprintf(stderr, "extra closing parens\n");
 				exit(1);
 			}
 
-			flow_stack[flow_stack_size - 1].is_evaled = 1;
-			if(flow_stack[flow_stack_size - 1].type == FLOW_LOOP) {
-				src = flow_stack[flow_stack_size - 1].start;
+			if(flow_stack_size > 0) {
+				flow_stack[flow_stack_size - 1].is_evaled = 1;
+				if(flow_stack[flow_stack_size - 1].type == FLOW_LOOP) {
+					src = flow_stack[flow_stack_size - 1].start;
+				}
 			}
 
 			break;
@@ -1327,6 +1477,15 @@ void free_vars() {
 
 	struct_stack = NULL;
 	struct_stack_size = 0;
+	for(int i = 0; i < func_stack_size; i++) {
+		if(func_stack[i] == NULL) {
+			continue;
+		}
+
+		free_func_def(&func_stack[i]);
+	}
+
+	NOT_NULL_FREE_SIZE(func_stack);
 }
 
 int main() {
