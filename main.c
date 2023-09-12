@@ -704,12 +704,91 @@ typedef struct {
 	var_value_t **arg_vals;
 	char *backtrack_src;
 	var_value_t value;
+	int is_set;
 } func_call_t;
+
+func_call_t *make_func_call(func_def_t *func_def) {
+	func_call_t *func_call = malloc(sizeof(func_call_t));
+	func_call->func_def = func_def;
+	int args_size = func_def->args_size;
+	func_call->arg_vals = malloc(sizeof(var_value_t *) * args_size);
+	for(int i = 0; i < args_size; i++) {
+		func_call->arg_vals[i] = malloc(sizeof(var_value_t));
+		memset(func_call->arg_vals[i], 0, sizeof(var_value_t));
+	}
+
+	memset(func_call->value, 0, sizeof(var_value_t));
+	func_call->backtrack_src = NULL;
+	func_call->is_set = 0;
+	return func_call;
+}
+
+void free_func_call(func_call_t **func_call) {
+	NULL_RETURN_REF(func_call);
+	int args_size = (*func_call)->func_def->args_size;
+	for(int i = 0; i < args_size; i++) {
+		if((*func_call)->arg_vals[i] == NULL) {
+			continue;
+		}
+
+		free((*func_call)->arg_vals[i]);
+		(*func_call)->arg_vals[i] = NULL;
+	}
+
+	NOT_NULL_FREE((*func_call)->arg_vals);
+	NOT_NULL_FREE(*func_call);
+}
 
 func_def_t **func_stack = NULL;
 int func_stack_size = 0;
+int func_stack_index(char *name) {
+	for(int i = 0; i < func_stack_size; i++) {
+		if(!strcmp(func_stack[i]->func_name, name)) {
+			return i;
+		}
+	}
+
+	return -1;
+}
+
 func_call_t **call_stack = NULL;
 int call_stack_size = 0;
+void call_stack_pop() {
+	if(call_stack_size <= 0) {
+		fprintf(stderr, "can't pop already empty call stack\n");
+		exit(1);
+	}
+
+	free_func_call(&(call_stack[call_stack_size - 1]));
+	call_stack_size--;
+	call_stack = safe_realloc(call_stack, sizeof(func_call_t) * call_stack_size);
+}
+
+// flowing
+enum {
+	FLOW_IF,
+	FLOW_LOOP,
+	FLOW_FUNC
+};
+
+typedef struct {
+	int type;
+	char *start;
+	int eval;
+	int is_evaled;	
+} flow_t;
+
+flow_t *flow_stack = NULL;
+int flow_stack_size = 0;
+void flow_stack_pop() {
+	if(flow_stack_size <= 0) {
+		fprintf(stderr, "can't pop already empty flow stack\n");
+		exit(1);
+	}
+
+	flow_stack_size--;
+	flow_stack = safe_realloc(flow_stack, sizeof(flow_t) * flow_stack_size);
+}
 
 // expr parsing
 char ident_copy[IDENT_MAX] = { 0 };
@@ -867,20 +946,76 @@ value_t value() {
 				eval_value = value();
 				break;
 			}
-	
-			int index = ident_var_index(1);
-			var_t var = vars[index];
-			eval_value = var_to_int(var);
-			memcpy(ident_copy, ident, IDENT_MAX);
-			EXPECT(IDENT);
-			found_ident = 1;
-			if(token == '.' && var.struct_val != NULL) {
-				current_struct_val = var.struct_val;
-				eval_value = value();
-				current_struct_val = NULL;
-			} else if(token == '.') {
-				fprintf(stderr, "tried to access a variable as a struct when it is not\n");
-				exit(1);
+
+			char temp_ident[IDENT_MAX] = { 0 };
+			memcpy(temp_ident, ident, IDENT_MAX);
+			int index = -1;
+			for(int i = 0; i < vars_size; i++) {
+				if(vars[i].name == NULL) {
+					continue;
+				}
+				
+				if(!strcmp(vars[i].name, ident)) {
+					index = i;
+				}
+			}
+
+			if(index != -1) {
+				var_t var = vars[index];
+				eval_value = var_to_int(var);
+				memcpy(ident_copy, ident, IDENT_MAX);
+				EXPECT(IDENT);
+				found_ident = 1;
+				if(token == '.' && var.struct_val != NULL) {
+					current_struct_val = var.struct_val;
+					eval_value = value();
+					current_struct_val = NULL;
+					break;
+				} else if(token == '.') {
+					fprintf(stderr, "tried to access a variable as a struct when it is not\n");
+					exit(1);
+				}
+			}
+
+			if(token == '[') {
+				int func_index = func_stack_index(temp_ident);
+				if(func_index == -1) {
+					fprintf(stderr, "can't find called function %s\n", temp_ident);
+					exit(1);
+				}
+				
+				func_call_t *new_call = make_func_call(func_stack[func_index]);
+				EXPECT('[');
+				int args_size = new_call->func_def->args_size;
+				for(int i = 0; token != STOP && i < args_size; i++) {
+					var_t temp_var = {
+						NULL,
+						new_call->func_def->arg_size[i],
+						new_call->func_def->arg_pos[i],
+						new_call->arg_vals[i],
+						NULL,
+						MEM_NONE
+					};
+
+					assign_int_var(&temp_var, expr());
+					if(token != ',') {
+						free_func_call(&new_call);
+						fprintf(stderr, "function call arguments missing a ',', or doesn't have enough arguments\n");
+						exit(1);
+					}
+
+					next();
+				}
+
+				if(token != ']') {
+					free_func_call(&new_call);
+					fprintf(stderr, "function call doesn't have a ']' at the end of it, or has too many arguments\n");
+					exit(1);
+				}
+
+				next();
+				new_call->backtrack_src = src;
+				src = new_call->func_def->src_start;
 			}
 			
 			break;
@@ -921,6 +1056,20 @@ value_t value() {
 			}
 
 			break;
+	}
+
+	if(call_stack_size > 0 && call_stack[call_stack_size - 1]->is_set) {
+		var_t temp_var = {
+			NULL,
+			call_stack[call_stack_size - 1]->func_def->func_size,
+			call_stack[call_stack_size - 1]->func_def->func_pos,
+			(unsigned char (*)[8])(call_stack[call_stack_size - 1]->value),
+			NULL,
+			MEM_NONE
+		};
+		
+		eval_value = var_to_int(temp_var);
+		call_stack_pop();
 	}
 
 	return eval_value;
@@ -1021,20 +1170,6 @@ void skip_block() {
 	}
 }
 
-enum {
-	FLOW_IF,
-	FLOW_LOOP
-};
-
-typedef struct {
-	int type;
-	char *start;
-	int eval;
-	int is_evaled;	
-} flow_t;
-
-flow_t *flow_stack = NULL;
-int flow_stack_size = 0;
 void stmt() {
 	int inital = token;
 
@@ -1275,9 +1410,12 @@ void stmt() {
 
 				func_def->src_start = src;
 				ARRAY_PUSH(func_stack, func_def_t *, func_def);
-				skip_block();
 				next();
-				EXPECT('}');
+				skip_block();
+				if(token == '}') {
+					next();
+				}
+				
 				break;
 			}
 
@@ -1390,6 +1528,27 @@ void stmt() {
 			EXPECT(IDENT);
 			EXPECT(']');
 			break;
+
+		case RET:
+			EXPECT(RET);
+			if(func_stack_size <= 0) {
+				fprintf(stderr, "ret isn't being used inside of a function\n");
+				exit(1);
+			}
+			
+			var_t temp_var = {
+				NULL,
+				call_stack[call_stack_size - 1]->func_def->func_size,
+				call_stack[call_stack_size - 1]->func_def->func_pos,
+				(unsigned char (*)[8])(call_stack[call_stack_size - 1]->value),
+				NULL,
+				MEM_NONE
+			};
+
+			assign_int_var(&temp_var, expr());
+			src = call_stack[call_stack_size - 1]->backtrack_src;
+			call_stack[call_stack_size - 1]->is_set = 1;
+			break;
 		
 		case '{':
 			fprintf(stderr, "block enter %d -> %d\n", var_scopes_size, var_scopes_size + 1);
@@ -1405,14 +1564,30 @@ void stmt() {
 				fprintf(stderr, "extra closing parens\n");
 				exit(1);
 			}
+			
+			if(
+				call_stack_size > 0 && 
+				flow_stack_size > 0 && 
+				flow_stack[flow_stack_size - 1].type == FLOW_FUNC
+			) {
+				if(call_stack[call_stack_size - 1]->func_def->func_size > 0) {
+					fprintf(stderr, "no return even though function does not have a b0 type\n");
+					exit(1);
+				}
+				
+				call_stack[call_stack_size - 1]->is_set = 1;
+			}
 
 			if(flow_stack_size > 0) {
 				flow_stack[flow_stack_size - 1].is_evaled = 1;
 				if(flow_stack[flow_stack_size - 1].type == FLOW_LOOP) {
 					src = flow_stack[flow_stack_size - 1].start;
 				}
+
+				break;
 			}
 
+			flow_stack_pop();
 			break;
 
 		default:
@@ -1486,6 +1661,15 @@ void free_vars() {
 	}
 
 	NOT_NULL_FREE_SIZE(func_stack);
+	for(int i = 0; i < call_stack_size; i++) {
+		if(call_stack[i] == NULL) {
+			continue;
+		}
+
+		free_func_call(&call_stack[i]);
+	}
+
+	NOT_NULL_FREE_SIZE(call_stack);
 }
 
 int main() {

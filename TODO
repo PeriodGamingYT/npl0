@@ -1,3 +1,5 @@
-Things to do:
-	Functions
-	Calling function pointers
+TODO
+	make functions be apart of the flow stack
+	add argument variables to it as well
+	have b0 be a valid type for functions
+	fprintf info on all statements
