@@ -1024,7 +1024,9 @@ value_t value() {
 				func_call_t *new_call = make_func_call(func_stack[func_index]);
 				EXPECT('[');
 				int args_size = new_call->func_def->args_size;
+				int skip_next = 0;
 				for(int i = 0; token != STOP && i < args_size; i++) {
+HARGS("0 %d:'%c' %c\n",token,token,*src)
 					var_t temp_var = {
 						NULL,
 						new_call->func_def->arg_size[i],
@@ -1034,18 +1036,19 @@ value_t value() {
 						MEM_NONE
 					};
 
-HARGS("0 %c %s\n",token,src)
-					if(token == ']') {
+					// hack for getting function args to stop pulling in args
+					if(*src == ']' || token == ']') {
+						skip_next = 1;
+						next();
+						token = ']';
 						break;
 					}
 					
 					assign_int_var(&temp_var, expr());
-HARGS("1 %c %s\n",token,src)
 					if(token == ']') {
 						break;
 					}
 
-// XXXXXX: this should not be occuring.
 					if(token != ',') {
 						free_func_call(&new_call);
 						fprintf(stderr, "function call arguments missing a ',', or doesn't have enough arguments\n");
@@ -1061,7 +1064,10 @@ HARGS("1 %c %s\n",token,src)
 					exit(1);
 				}
 
-				next();
+				if(!skip_next) {
+					next();
+				}
+				
 				new_call->backtrack_src = src;
 				src = new_call->func_def->src_start;
 				flow_t func_flow = {
@@ -1666,7 +1672,6 @@ void stmt() {
 
 				call_stack[call_stack_size - 1]->is_set = 1;
 				src = call_stack[call_stack_size - 1]->backtrack_src;
-HARGS("src %d\n",*src)
 			} else if(flow_stack_size > 0) {
 				flow_stack[flow_stack_size - 1].is_evaled = 1;
 				if(flow_stack[flow_stack_size - 1].type == FLOW_LOOP) {
