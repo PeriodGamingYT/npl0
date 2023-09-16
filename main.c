@@ -160,6 +160,43 @@ void next() {
 		return;
 	}
 
+	if(*src == '\'') {
+		src++;
+		if(*src == '\\') {
+			src++;
+			switch(*src) {
+				case 'a': token_val = '\a'; break;
+				case 'b': token_val = '\b'; break;
+				case 'n': token_val = '\n'; break;
+				case 'f': token_val = '\f'; break;
+				case 'r': token_val = '\r'; break;
+				case 't': token_val = '\t'; break;
+				case 'v': token_val = '\v'; break;
+				case '\\': token_val = '\\'; break;
+				case '\'': token_val = '\''; break;
+			}
+
+			src++;
+			if(*src != '\'') {
+				fprintf(stderr, "character doesn't end with a quote\n");
+				exit(1);
+			}
+
+			src++;
+			return;
+		}
+
+		token_val = *src;
+		src++;
+		if(*src != '\'') {
+			fprintf(stderr, "character doesn't end with a quote\n");
+			exit(1);
+		}
+
+		src++;
+		return;
+	}
+
 	// idents
 	skip_comment();
 	if(IS_IDENT_START(*src)) {
