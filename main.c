@@ -61,9 +61,12 @@ enum {
 #define IS_NEWLINE(_x) \
 	((_x) == '\n' || (_x) == '\r')
 
+#define ARRAY_PUSH_UNDEF_NO_SIZE(_x, _y, _z) \
+	_z++; \
+	_x = safe_realloc(_x, sizeof(_y) * _z)
+
 #define ARRAY_PUSH_UNDEF(_x, _y) \
-	_x##_size++; \
-	_x = safe_realloc(_x, sizeof(_y) * _x##_size)
+	ARRAY_PUSH_UNDEF_NO_SIZE(_x, _y, _x##_size)
 
 #define ARRAY_PUSH(_x, _y, _z) \
 	ARRAY_PUSH_UNDEF(_x, _y); \
@@ -557,6 +560,8 @@ void assign_int_var(var_t *var, value_t x) {
 
 var_t *vars = NULL;
 int vars_size = 0;
+int is_scope_func = 0;
+int *scope_funcs = NULL;
 int *var_scopes = NULL;
 int var_scopes_size = 0;
 void ident_var_add() {
@@ -569,7 +574,15 @@ void ident_var_add() {
 }
 
 int ident_var_index(int is_last_error) {
-	for(int i = 0; i < vars_size; i++) {
+	int scopes_size = vars_size - 1;
+	for(int i = var_scopes_size - 1; i >= 0; i--) {
+		scopes_size -= var_scopes[i] - 1;
+		if(scope_funcs[i]) {
+			break;
+		}
+	}
+	
+	for(int i = vars_size - 1; i >= 0 && i >= scopes_size; i--) {
 		if(vars[i].name == NULL) {
 			continue;
 		}
@@ -590,10 +603,12 @@ int ident_var_index(int is_last_error) {
 
 void var_scope_add() {
 	ARRAY_PUSH(var_scopes, int, 0);
+	scope_funcs = safe_realloc(scope_funcs, sizeof(int) * var_scopes_size);
+	scope_funcs[var_scopes_size] = is_scope_func;
 }
 
 void var_scope_remove() {
-	if(var_scopes_size <= 0 || vars_size <= 0) {
+	if(var_scopes_size <= 0) {
 		fprintf(stderr, "can't remove scope any further\n");
 		exit(1);
 	}
@@ -625,8 +640,10 @@ void var_scope_remove() {
 	
 	var_scopes_size--;
 	var_scopes = safe_realloc(var_scopes, sizeof(int) * var_scopes_size);
+	scope_funcs = safe_realloc(scope_funcs, sizeof(int) * var_scopes_size);
 	if(var_scopes_size <= 0) {
 		var_scopes = NULL;
+		scope_funcs = NULL;
 	}
 }
 
@@ -814,26 +831,12 @@ value_t expr();
 int found_ident = 0;
 struct_val_t *current_struct_val = NULL;
 var_def_t struct_prop_def = { NULL, 0, 0 };
+void stmt();
 value_t value() {
 	value_t eval_value = 0;
 	if(token == STOP || !(*src) || *src == -1) {
 		fprintf(stderr, "can't find a token to get value of, found end of file instead\n");
 		exit(1);
-	}
-
-	if(call_stack_size > 0 && call_stack[call_stack_size - 1]->is_set) {
-		var_t temp_var = {
-			NULL,
-			call_stack[call_stack_size - 1]->func_def->func_size,
-			call_stack[call_stack_size - 1]->func_def->func_pos,
-			(unsigned char (*)[8])(call_stack[call_stack_size - 1]->value),
-			NULL,
-			MEM_NONE
-		};
-		
-		eval_value = var_to_int(temp_var);
-		call_stack_pop();
-		return eval_value;
 	}
 
 	switch(token) {
@@ -1008,6 +1011,8 @@ value_t value() {
 					fprintf(stderr, "tried to access a variable as a struct when it is not\n");
 					exit(1);
 				}
+
+				break;
 			}
 
 			if(token != '[') {
@@ -1024,9 +1029,7 @@ value_t value() {
 				func_call_t *new_call = make_func_call(func_stack[func_index]);
 				EXPECT('[');
 				int args_size = new_call->func_def->args_size;
-				int skip_next = 0;
 				for(int i = 0; token != STOP && i < args_size; i++) {
-HARGS("0 %d:'%c' %c\n",token,token,*src)
 					var_t temp_var = {
 						NULL,
 						new_call->func_def->arg_size[i],
@@ -1035,14 +1038,6 @@ HARGS("0 %d:'%c' %c\n",token,token,*src)
 						NULL,
 						MEM_NONE
 					};
-
-					// hack for getting function args to stop pulling in args
-					if(*src == ']' || token == ']') {
-						skip_next = 1;
-						next();
-						token = ']';
-						break;
-					}
 					
 					assign_int_var(&temp_var, expr());
 					if(token == ']') {
@@ -1064,10 +1059,6 @@ HARGS("0 %d:'%c' %c\n",token,token,*src)
 					exit(1);
 				}
 
-				if(!skip_next) {
-					next();
-				}
-				
 				new_call->backtrack_src = src;
 				src = new_call->func_def->src_start;
 				flow_t func_flow = {
@@ -1078,7 +1069,9 @@ HARGS("0 %d:'%c' %c\n",token,token,*src)
 				};
 				
 				ARRAY_PUSH(flow_stack, flow_t, func_flow);
+				fprintf(stderr, "func call block enter %d -> ", var_scopes_size);
 				var_scope_add();
+				fprintf(stderr, "%d\n", var_scopes_size);
 				char temp_ident[IDENT_MAX] = { 0 };
 				memcpy(temp_ident, ident, IDENT_MAX);
 				func_def_t *func_def = new_call->func_def;
@@ -1099,10 +1092,29 @@ HARGS("0 %d:'%c' %c\n",token,token,*src)
 
 				ARRAY_PUSH(call_stack, func_call_t *, new_call);
 				memcpy(ident, temp_ident, IDENT_MAX);
-				fprintf(stderr, "calling function, ignore first expr below\n");
+				fprintf(stderr, "calling function %s\n", new_call->func_def->func_name);
 
-				// skip ']' and '{', skip bracket because flow and var scope is 
+				// skip ']' and '{', skipped bracket because flow and var scope is 
 				// already setup
+				next();
+				while(!call_stack[call_stack_size - 1]->is_set && token != STOP && *src && *src != -1) {
+					stmt();
+				}
+
+				var_t temp_var = {
+					NULL,
+					call_stack[call_stack_size - 1]->func_def->func_size,
+					call_stack[call_stack_size - 1]->func_def->func_pos,
+					(unsigned char (*)[8])(call_stack[call_stack_size - 1]->value),
+					NULL,
+					MEM_NONE
+				};
+				
+				eval_value = var_to_int(temp_var);
+				src = call_stack[call_stack_size - 1]->backtrack_src;
+				call_stack_pop();
+
+				// consume next token for expr
 				next();
 			}
 			
@@ -1255,6 +1267,7 @@ void stmt() {
 	
 	switch(inital) {
 		case STOP:
+			fprintf(stderr, "hit stop point\n");
 			return;
 
 		// if one of these opers are found here it has to be unary		
@@ -1353,6 +1366,7 @@ void stmt() {
 
 					ARRAY_PUSH(struct_stack, struct_def_t *, new_struct);
 					next();
+					fprintf(stderr, "decl struct %s\n", new_struct->struct_name);
 					break;
 				}
 
@@ -1380,6 +1394,7 @@ void stmt() {
 			break;
 
 		// skip b0 because b0 is only for functions	
+		case B0:
 		case B8:
 		case B16:
 		case B32:
@@ -1391,13 +1406,20 @@ void stmt() {
 
 		case BPTR:
 			next();
-			if(token != '+' && token != '-') {
+			if(inital != B0 && token != '+' && token != '-') {
 				fprintf(stderr, "when declaring, a type needs to be followed by a +/-\n");
 				exit(1);
 			}
 
-			int is_pos = token == '+';
-			next();
+			// you don't say -0 in math, is_pos being 0 implies that a 
+			// zero var type has a '-' when it doesn't
+			// this is why it's 1 by default
+			int is_pos = 1;
+			if(inital != B0) {
+				is_pos = token == '+';
+				next();
+			}
+			
 			int mem_type = MEM_NONE;
 			if(
 				token == STACK ||
@@ -1430,6 +1452,8 @@ void stmt() {
 			int var_size = int_pow(2, inital - B8);
 			if(inital == BPTR) {
 				var_size = sizeof(void *);	
+			} else if(inital == B0) {
+				var_size = 0;
 			}
 			
 			next();
@@ -1501,7 +1525,8 @@ void stmt() {
 				if(token == '}') {
 					next();
 				}
-				
+
+				fprintf(stderr, "decl func %s\n", func_def->func_name);
 				break;
 			}
 
@@ -1527,7 +1552,8 @@ void stmt() {
 
 		case IF:
 			EXPECT(IF);
-			int result = expr();
+			value_t result = expr();
+			fprintf(stderr, "if %ld\n", result);
 			flow_t flow = {
 				FLOW_IF,
 				NULL,
@@ -1562,7 +1588,8 @@ void stmt() {
 
 			if(token == IF) {
 				EXPECT(IF);
-				int if_result = expr();
+				value_t if_result = expr();
+				fprintf(stderr, "else if %ld\n", if_result);
 				flow_t if_flow = {
 					FLOW_IF,
 					NULL,
@@ -1574,6 +1601,8 @@ void stmt() {
 				if(!if_result) {
 					break;
 				}
+			} else {
+				fprintf(stderr, "else\n");
 			}
 
 			break;
@@ -1597,7 +1626,8 @@ void stmt() {
 			}
 
 			EXPECT(LOOP);
-			int loop_expr = expr();
+			value_t loop_expr = expr();
+			fprintf(stderr, "loop %ld\n", loop_expr);
 			flow_stack[flow_stack_size - 1].eval = loop_expr;
 			if(!loop_expr) {
 				skip_block();
@@ -1609,6 +1639,7 @@ void stmt() {
 			EXPECT(FREE);
 			EXPECT('[');
 			int free_index = ident_var_index(1);
+			fprintf(stderr, "free %s\n", ident);
 			free((void *) var_to_int(vars[free_index]));
 			assign_int_var(&(vars[free_index]), 0);
 			EXPECT(IDENT);
@@ -1631,17 +1662,26 @@ void stmt() {
 				MEM_NONE
 			};
 
-			assign_int_var(&temp_var, expr());
+			value_t return_result = expr();
+			fprintf(stderr, "ret result %ld, block remove %d -> ", return_result, var_scopes_size);
+			assign_int_var(&temp_var, return_result);
 			src = call_stack[call_stack_size - 1]->backtrack_src;
 			call_stack[call_stack_size - 1]->is_set = 1;
 			while(flow_stack_size > 0 && flow_stack[flow_stack_size - 1].type != FLOW_FUNC) {
 				flow_stack_pop();
+				if(var_scopes_size > 0) {
+					var_scope_remove();
+				}
 			}
 
 			if(flow_stack_size > 0 && flow_stack[flow_stack_size - 1].type == FLOW_FUNC) {
 				flow_stack_pop();
+				if(var_scopes_size > 0) {
+					var_scope_remove();
+				}
 			}
-			
+
+			fprintf(stderr, "%d\n", flow_stack_size);
 			break;
 			
 		
@@ -1732,6 +1772,7 @@ void free_vars() {
 
 	NOT_NULL_FREE_SIZE(var_values);
 	NOT_NULL_FREE_SIZE(var_scopes);
+	NOT_NULL_FREE(scope_funcs);
 	NOT_NULL_FREE_SIZE(flow_stack);
 	NOT_NULL_FREE_SIZE(vars);
 	free(start_src);

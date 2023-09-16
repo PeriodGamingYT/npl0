@@ -8,3 +8,8 @@ b32+ sum[b32+ a, b32+ b] {
 
 \ should be 10 hopefully
 sum[5, 5]
+b0 test[] {
+	\ does nothing
+}
+
+test[]
