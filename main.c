@@ -1799,12 +1799,9 @@ void free_vars() {
 
 	NOT_NULL_FREE_SIZE(func_stack);
 	NOT_NULL_FREE(scope_funcs);
-	// NOT_NULL_FREE_SIZE(var_values);
-if(var_values!=NULL){
-free(var_values);
-var_values=NULL;
-}
-var_values_size=0;
+
+	// cppcheck has a false positive here
+	NOT_NULL_FREE_SIZE(var_values);
 }
 
 int main() {
