@@ -1,4 +1,5 @@
-This is a calculator to practice lexing and parsing.
-Lexing and parsing is not my strong suit in programming, not by a long shot.
-I feel that doing codegen and IR in npl0 will be much easier to do.
-
+This is an interpreter I made, originating from nathan-calc.
+It was a fork of it, which has been turned into a full fledged language.
+This is a toy language.
+Please for the love do not use this in production.
+There's probaly bugs, so please be aware of that.
