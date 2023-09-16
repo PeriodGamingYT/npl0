@@ -99,9 +99,6 @@ enum {
 char ident[IDENT_MAX] = { 0 };
 int ident_index = 0;
 typedef intptr_t value_t;
-
-// DEF: print_value_bytes
-
 int token = 0;
 value_t token_val = 0;
 char *src = NULL;
@@ -311,8 +308,6 @@ typedef struct struct_def_s {
 	int *mem_type;
 } struct_def_t;
 
-// DEF: print_struct_def
-
 // part of vars
 #define VALUE_MAX 8
 typedef unsigned char var_value_t[VALUE_MAX];
@@ -322,8 +317,6 @@ typedef struct struct_val_s {
 	char *name;
 	struct struct_val_s **struct_vals;
 } struct_val_t;
-
-// DEF: print_value_bytes
 
 enum {
 	MEM_NONE,
@@ -1072,8 +1065,8 @@ value_t value() {
 				fprintf(stderr, "func call block enter %d -> ", var_scopes_size);
 				var_scope_add();
 				fprintf(stderr, "%d\n", var_scopes_size);
-				char temp_ident[IDENT_MAX] = { 0 };
-				memcpy(temp_ident, ident, IDENT_MAX);
+				char func_temp_ident[IDENT_MAX] = { 0 };
+				memcpy(func_temp_ident, ident, IDENT_MAX);
 				func_def_t *func_def = new_call->func_def;
 				for(int i = 0; i < args_size; i++) {
 					memset(ident, 0, IDENT_MAX);
@@ -1091,7 +1084,7 @@ value_t value() {
 				}
 
 				ARRAY_PUSH(call_stack, func_call_t *, new_call);
-				memcpy(ident, temp_ident, IDENT_MAX);
+				memcpy(ident, func_temp_ident, IDENT_MAX);
 				fprintf(stderr, "calling function %s\n", new_call->func_def->func_name);
 
 				// skip ']' and '{', skipped bracket because flow and var scope is 
@@ -1734,7 +1727,8 @@ void stmt() {
 // main
 void free_vars() {
 
-	// not freeing stuff but this is the exit function so that's why it's here
+	// line code below not freeing stuff but 
+	// this is the exit function so that's why this is here
 	int line = 1;
 	char *temp_src = start_src;
 	for(; temp_src != src; temp_src++) {
@@ -1770,9 +1764,7 @@ void free_vars() {
 		var_values[i] = NULL;
 	}
 
-	NOT_NULL_FREE_SIZE(var_values);
 	NOT_NULL_FREE_SIZE(var_scopes);
-	NOT_NULL_FREE(scope_funcs);
 	NOT_NULL_FREE_SIZE(flow_stack);
 	NOT_NULL_FREE_SIZE(vars);
 	free(start_src);
@@ -1806,6 +1798,13 @@ void free_vars() {
 	}
 
 	NOT_NULL_FREE_SIZE(func_stack);
+	NOT_NULL_FREE(scope_funcs);
+	// NOT_NULL_FREE_SIZE(var_values);
+if(var_values!=NULL){
+free(var_values);
+var_values=NULL;
+}
+var_values_size=0;
 }
 
 int main() {
