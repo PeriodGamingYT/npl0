@@ -1638,6 +1638,19 @@ void stmt() {
 			break;
 
 		case LOOP:
+
+			// this is a hack because the first token is loaded in before calling stmt
+			// but here we don't want that. so this code makes sure to offset it before the encounter the "loop" word
+			char *loop_src = src;
+			while(loop_src > start_src && IS_WHITESPACE(*loop_src)) {
+				loop_src--;
+			}
+
+			// /------ loop_src - 3
+			// |  /--- loop_src
+			// |  |
+			// loop
+			loop_src -= 3;
 			flow_t current_flow = flow_stack_size <= 0
 
 				// no flow, fill with zeros because current_flow will be ignored
@@ -1647,7 +1660,7 @@ void stmt() {
 			if(flow_stack_size <= 0 || current_flow.type != LOOP || src != current_flow.start) {
 				flow_t loop_flow = {
 					FLOW_LOOP,
-					src,
+					loop_src,
 					0,
 					0
 				};
@@ -1746,6 +1759,9 @@ void stmt() {
 				flow_stack[flow_stack_size - 1].is_evaled = 1;
 				if(flow_stack[flow_stack_size - 1].type == FLOW_LOOP) {
 					src = flow_stack[flow_stack_size - 1].start;
+
+					// consume token for next stmt call
+					next();
 				}
 			}
 

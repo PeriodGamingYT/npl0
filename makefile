@@ -13,3 +13,8 @@ run:
 lint:
 	clear
 	cppcheck --enable=all main.c
+gdb:
+	gcc -g -O0 -o main main.c
+	cat test.npl | xclip -sel clip
+	clear
+	gdb ./main
