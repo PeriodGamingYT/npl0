@@ -607,7 +607,7 @@ int ident_var_index(int is_last_error) {
 	int scopes_size = vars_size - 1;
 	for(int i = var_scopes_size - 1; i >= 0; i--) {
 		scopes_size -= var_scopes[i] - 1;
-		if(scope_funcs[i]) {
+		if(scope_funcs != NULL && scope_funcs[i]) {
 			break;
 		}
 	}
