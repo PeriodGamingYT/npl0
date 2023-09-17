@@ -612,6 +612,11 @@ int ident_var_index(int is_last_error) {
 		}
 	}
 
+	// scopes_size is one based i believe, this fixes that
+	if(scopes_size > 0) {
+		scopes_size--;
+	}
+	
 	for(int i = vars_size - 1; i >= 0 && i >= scopes_size; i--) {
 		if(vars[i].name == NULL) {
 			continue;
@@ -1282,7 +1287,7 @@ void skip_block() {
 		next();
 	} while(brace_count > 0 && token != STOP);
 	
-	if(token == STOP) {
+	if(token == STOP && brace_count != 0) {
 		fprintf(stderr, "unmatched braces\n");
 		exit(1);
 	}
