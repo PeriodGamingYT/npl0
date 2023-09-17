@@ -3,3 +3,41 @@ It was a fork of it, which has been turned into a full fledged language.
 This is a toy language.
 Please for the love do not use this in production.
 There's probaly bugs, so please be aware of that.
+
+Expressions
+	You can have an expr by itself
+	Just like in C, but all binary operators (Except '=') have the same precedence.
+
+Declaring
+	b64 errors if you aren't on a 64 bit system
+	(b8|b16|b32|b64|bptr|ident)(+|-) ident = expr to declare
+
+Control flow
+	If the same as C
+	if expr {
+		...
+	} else if expr {
+		...
+	} ... else {
+		
+	}
+
+	loop is just a while loop in C
+	loop expr {
+		...
+	}
+
+Pointers
+	:x to get address of x
+	@(b8|b16|b32|b64|bptr)(+|-) expr to get value of address provided by expr
+	expr =(b8|b16|b32|b64|bptr) expr to set address provided by the first expression as the second
+	#(expr) struct_name> struct_prop to get struct offset (like how C does structs)
+
+Structs
+	ident {
+		(b8|b16|b32|b64|bptr|ident)(+|-) ident
+		...
+	}
+
+	ident ident to declare second ident with the structure of first ident
+	ident.ident.(...and so on) to get property of the first, then second, and so on
