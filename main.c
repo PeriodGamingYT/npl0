@@ -611,7 +611,7 @@ int ident_var_index(int is_last_error) {
 			break;
 		}
 	}
-	
+
 	for(int i = vars_size - 1; i >= 0 && i >= scopes_size; i--) {
 		if(vars[i].name == NULL) {
 			continue;
@@ -1100,7 +1100,9 @@ value_t value() {
 				
 				ARRAY_PUSH(flow_stack, flow_t, func_flow);
 				fprintf(stderr, "func call block enter %d -> ", var_scopes_size);
+				is_scope_func = 1;
 				var_scope_add();
+				is_scope_func = 0;
 				fprintf(stderr, "%d\n", var_scopes_size);
 				char func_temp_ident[IDENT_MAX] = { 0 };
 				memcpy(func_temp_ident, ident, IDENT_MAX);
@@ -1731,6 +1733,7 @@ void stmt() {
 		case '{':
 			fprintf(stderr, "block enter %d -> %d\n", var_scopes_size, var_scopes_size + 1);
 			EXPECT('{');
+			is_scope_func = 0;
 			var_scope_add();
 			break;
 
